@@ -50,7 +50,8 @@ chmod 600 "$auth_headers"
 cleanup() {
   rm -f "$auth_headers"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 0' INT TERM
 
 measure_target() {
   local target_id="$1" family="$2" address="$3"
