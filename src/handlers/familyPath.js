@@ -18,6 +18,7 @@ const ALLOWED_HISTORY_HOURS = new Set([24, 168, 720]);
 const BANDWIDTH_LEASE_MS = 15 * 60 * 1000;
 const BANDWIDTH_INTERVAL_MS = FAMILY_PATH_BANDWIDTH_INTERVAL_HOURS * 60 * 60 * 1000;
 const BANDWIDTH_ERROR_RETRY_MS = 15 * 60 * 1000;
+const HISTORY_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 
 function cleanText(value, max = 128) {
   return String(value ?? '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, max);
@@ -208,7 +209,7 @@ async function saveBandwidthResult(env, body) {
         home_to_vps_mbps = CASE WHEN excluded.bandwidth_status = 'ok' THEN excluded.home_to_vps_mbps ELSE family_path_latest.home_to_vps_mbps END,
         bandwidth_bytes = CASE WHEN excluded.bandwidth_status = 'ok' THEN excluded.bandwidth_bytes ELSE family_path_latest.bandwidth_bytes END,
         bandwidth_error = excluded.bandwidth_error
-      WHERE excluded.bandwidth_at >= family_path_latest.bandwidth_started_at
+      WHERE excluded.bandwidth_at >= family_path_latest.bandwidth_at
     `).bind(
       server.id,
       result.family,
@@ -240,7 +241,9 @@ async function saveBandwidthResult(env, body) {
       result.bytes_transferred,
       status,
       result.error
-    )
+    ),
+    env.DB.prepare('DELETE FROM family_path_history WHERE observed_at < ?')
+      .bind(Date.now() - HISTORY_RETENTION_MS)
   ]);
   return createSuccessResponse({ success: true, status, observed_at: result.observed_at });
 }
@@ -320,6 +323,7 @@ export async function handleFamilyPathAPI(request, env, sys) {
       server_id: row.server_id,
       server_name: byId.get(String(row.server_id))?.name || row.server_id,
       region: byId.get(String(row.server_id))?.region || '',
+      sort_order: Number(byId.get(String(row.server_id))?.sort_order) || 0,
       family: row.family,
       ip_address: row.ip_address,
       latency_status: row.latency_status,
@@ -338,7 +342,7 @@ export async function handleFamilyPathAPI(request, env, sys) {
       bandwidth_bytes: Number(row.bandwidth_bytes) || 0,
       bandwidth_error: row.bandwidth_error || ''
     }))
-    .sort((a, b) => a.server_name.localeCompare(b.server_name) || a.family.localeCompare(b.family));
+    .sort((a, b) => a.sort_order - b.sort_order || a.server_name.localeCompare(b.server_name) || a.family.localeCompare(b.family));
   const familyCount = paths.length;
   return createSuccessResponse({
     can_trigger: isLoggedIn,

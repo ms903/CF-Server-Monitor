@@ -21,7 +21,7 @@
   try { preferredLanguage = localStorage.getItem('language_preference') || ''; } catch (_) {}
   const chinese = preferredLanguage === 'zh' || (!preferredLanguage && /^zh\b/i.test(navigator.language || ''));
   const t = chinese ? {
-    kicker: '公网路径', title: 'Home Server → 各服务器',
+    kicker: '公网路径', title: 'Home Server ↔ 各服务器',
     hint: 'IPv4 / IPv6 独立探测：延迟每分钟更新，双向带宽每 6 小时更新。',
     all: '全部测速', test: '测速', queued: '排队中', testing: '测速中', waiting: '等待数据',
     failed: '失败', latency: '延迟', loss: '丢包', vpsToHome: 'VPS → Home', homeToVps: 'Home → VPS',
@@ -29,7 +29,7 @@
     noHistory: '还没有该地址族的测速历史', points: '次测速', agoS: '秒前', agoM: '分钟前', agoH: '小时前', agoD: '天前',
     p95: 'p95', jitter: '抖动', measured: '已测路径', budget: '月流量上限约', address: '地址'
   } : {
-    kicker: 'PUBLIC PATHS', title: 'Home Server → Servers',
+    kicker: 'PUBLIC PATHS', title: 'Home Server ↔ Servers',
     hint: 'IPv4 and IPv6 are measured independently: latency every minute, bidirectional speed every 6 hours.',
     all: 'Test all', test: 'Test', queued: 'Queued', testing: 'Testing', waiting: 'Waiting',
     failed: 'Failed', latency: 'Latency', loss: 'Loss', vpsToHome: 'VPS → Home', homeToVps: 'Home → VPS',
