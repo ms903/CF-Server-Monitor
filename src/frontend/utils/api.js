@@ -290,6 +290,15 @@ export const fetchServers = async () => {
   return result.data
 }
 
+export const fetchSourceLatency = async (apiIndex = 0) => {
+  const result = await http.getByIndex('/api/source-latency', apiIndex, {
+    autoRedirect: false,
+    timeoutMs: DEFAULT_REQUEST_TIMEOUT_MS
+  })
+  if (result.error) return null
+  return result.data
+}
+
 export const fetchServersAll = async () => {
   const results = await http.getAll('/api/servers')
   const multiSite = hasMultipleApiBases()

@@ -18,6 +18,7 @@ import {
   DASHBOARD_LATENCY_WINDOW_POINTS,
   DASHBOARD_LATENCY_WINDOW_QUERY_CONCURRENCY
 } from '../utils/config.js';
+import { ensureSourceLatencyTable } from './sourceLatency.js';
 
 let dbInitialized = false;
 
@@ -119,6 +120,7 @@ export async function initDatabase(db) {
 
     // 确保 metrics_history 表存在（主键 id 已编码分区与时间，无需二级索引）
     await db.prepare(createHistoryTableSql('metrics_history')).run();
+    await ensureSourceLatencyTable(db);
 
     debug('✅ 数据库初始化完成');
     dbInitialized = true;

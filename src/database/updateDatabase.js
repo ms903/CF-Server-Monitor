@@ -7,6 +7,7 @@ import {
   normalizePrice
 } from '../utils/serverBilling.js';
 import { HISTORY_UPGRADE_COLUMNS } from '../utils/historyFields.js';
+import { ensureSourceLatencyTable } from './sourceLatency.js';
 
 
 export async function updateDatabase(db) {
@@ -22,6 +23,9 @@ export async function updateDatabase(db) {
     
     const historyCols = await addHistoryColumns(db);
     results.push({ name: 'metrics_history 表列更新', ...historyCols });
+
+    await ensureSourceLatencyTable(db);
+    results.push({ name: 'source_latency 表', success: true });
 
     // 无需清理metrics_history多余字段，消耗过大，不影响使用，每周执行weeklyCleanup的时候会自动清理
     

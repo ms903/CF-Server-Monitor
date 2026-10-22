@@ -6,6 +6,11 @@ import { serveFrontend } from './handlers/frontend.js';
 import { handleUpdate, handleWebSocketUpgrade, handleUpdateWebSocketUpgrade } from './handlers/update.js';
 import { handleServerAPI, handleServersAPI } from './handlers/dashboard.js';
 import { handleTheme } from './handlers/theme.js';
+import {
+  handleSourceLatencyAPI,
+  handleSourceLatencyTargets,
+  handleSourceLatencyUpdate
+} from './handlers/sourceLatency.js';
 import { isValidThemeOptions, loadSettings, loadSiteSettings, loadAppearanceOptions, normalizeFrontendWsTimeoutMinutes, normalizeLongHistoryPoints, saveThemeOptions, setDebug, debug } from './utils/settings.js';
 import { omitNullLossProbeFields } from './handlers/dashboard.js';
 import { checkAuth, simpleAuthResponse } from './middleware/auth.js';
@@ -280,6 +285,8 @@ export default {
     const routes = [
       { method: 'POST', path: '/update', handler: () => handleUpdate(request, env, ctx) },
       { method: 'GET', path: '/update', handler: () => handleUpdateWebSocketUpgrade(request, env) },
+      { method: 'GET', path: '/source-latency/targets', handler: () => handleSourceLatencyTargets(request, env) },
+      { method: 'POST', path: '/source-latency/update', handler: () => handleSourceLatencyUpdate(request, env) },
       { method: 'GET', path: '/__do/health', handler: async () => {
         if (!env.METRICS_BROADCASTER) {
           return createSuccessResponse({ ok: false, reason: 'DO not bound' });
@@ -397,6 +404,10 @@ export default {
       { method: 'GET', path: '/api/servers', handler: async () => {
         await ensureFullSettings();
         return handleServersAPI(request, env, sys);
+      }},
+      { method: 'GET', path: '/api/source-latency', handler: async () => {
+        await ensureSiteSettings();
+        return handleSourceLatencyAPI(request, env, sys);
       }},
       { method: 'GET', path: '/api/ws', handler: async () => handleWebSocketUpgrade(request, env) },
 
