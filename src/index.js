@@ -6,6 +6,11 @@ import { serveFrontend } from './handlers/frontend.js';
 import { handleUpdate, handleWebSocketUpgrade, handleUpdateWebSocketUpgrade } from './handlers/update.js';
 import { handleServerAPI, handleServersAPI } from './handlers/dashboard.js';
 import { handleTheme } from './handlers/theme.js';
+import {
+  handlePathBandwidthAgent,
+  handlePathBandwidthAPI,
+  handlePathBandwidthTrigger
+} from './handlers/pathBandwidth.js';
 import { isValidThemeOptions, loadSettings, loadSiteSettings, loadAppearanceOptions, normalizeFrontendWsTimeoutMinutes, normalizeLongHistoryPoints, saveThemeOptions, setDebug, debug } from './utils/settings.js';
 import { omitNullLossProbeFields } from './handlers/dashboard.js';
 import { checkAuth, simpleAuthResponse } from './middleware/auth.js';
@@ -223,6 +228,7 @@ export default {
     const bypassTurnstilePaths = [
       '/admin/api',
       '/api/ws',
+      '/api/path-bandwidth/agent',
     ];
 
     const isApiRequest = path.startsWith('/api/') || path.startsWith('/admin/api');
@@ -280,6 +286,28 @@ export default {
     const routes = [
       { method: 'POST', path: '/update', handler: () => handleUpdate(request, env, ctx) },
       { method: 'GET', path: '/update', handler: () => handleUpdateWebSocketUpgrade(request, env) },
+      { method: 'GET', path: '/path-bandwidth-widget.js', handler: async () => {
+        if (!env.ASSETS) return createNotFoundResponse();
+        const assetUrl = new URL('/path-bandwidth-widget.js', request.url);
+        const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, { method: 'GET' }));
+        if (!assetResponse.ok) return assetResponse;
+        const headers = new Headers(assetResponse.headers);
+        headers.set('Content-Type', 'application/javascript;charset=UTF-8');
+        headers.set('Cache-Control', 'public, max-age=300');
+        return new Response(assetResponse.body, { status: 200, headers });
+      }},
+      { method: 'POST', path: '/api/path-bandwidth/agent', handler: async () => {
+        await ensureSiteSettings();
+        return handlePathBandwidthAgent(request, env, sys);
+      }},
+      { method: 'GET', path: '/api/path-bandwidth', handler: async () => {
+        await ensureSiteSettings();
+        return handlePathBandwidthAPI(request, env, sys);
+      }},
+      { method: 'POST', path: '/api/path-bandwidth/trigger', handler: async () => {
+        await ensureSiteSettings();
+        return handlePathBandwidthTrigger(request, env, sys);
+      }},
       { method: 'GET', path: '/__do/health', handler: async () => {
         if (!env.METRICS_BROADCASTER) {
           return createSuccessResponse({ ok: false, reason: 'DO not bound' });
