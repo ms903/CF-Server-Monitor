@@ -4,8 +4,8 @@ permissions:
   contents: write
 
 on:
-  schedule:
-    - cron: "0 0 * * *" # every day
+  # This fork has a production-specific deployment workflow. Sync upstream
+  # manually so deployment changes can be reviewed instead of overwritten.
   workflow_dispatch:
 
 jobs:

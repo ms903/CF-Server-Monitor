@@ -1,4 +1,4 @@
-name: Deploy to Cloudflare Workers
+name: Deploy CF Server Monitor
 
 on:
   push:
@@ -10,54 +10,55 @@ on:
       - 'LICENSE'
   workflow_dispatch:
 
-jobs:
-  check:
-    runs-on: ubuntu-latest
-    outputs:
-      should_deploy: ${{ steps.decide.outputs.should_deploy }}
-    steps:
-      - id: decide
-        run: |
-          if [ -n "$CF_ACCOUNT_ID" ] || [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "should_deploy=true" >> $GITHUB_OUTPUT
-          else
-            echo "should_deploy=false" >> $GITHUB_OUTPUT
-          fi
-        env:
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          EVENT_NAME: ${{ github.event_name }}
+permissions:
+  contents: read
 
+concurrency:
+  group: cf-server-monitor-production
+  cancel-in-progress: true
+
+jobs:
   deploy:
-    needs: check
-    if: needs.check.outputs.should_deploy == 'true'
     runs-on: ubuntu-latest
-    name: Deploy
+    environment:
+      name: production
+      url: https://monitor.ms903.org
     steps:
-      - name: 📥 Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 🔧 Setup Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
 
-      - name: 📦 Install dependencies
-        run: npm install
+      - name: Install dependencies
+        run: npm ci
 
-      - name: 🏗️ Build frontend assets
+      - name: Test
+        run: npm test
+
+      - name: Build frontend
         run: npm run build:frontend
 
-      - name: 📝 Create wrangler.toml
+      - name: Create production Wrangler configuration
+        env:
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
         run: |
-          cat > wrangler.toml << 'WEOF'
-          name = "server-monitor-pro"
+          set -euo pipefail
+          test -n "$D1_DATABASE_ID"
+          cat > wrangler.toml <<WEOF
+          name = "cf-server-monitor"
           main = "src/index.js"
           compatibility_date = "2024-12-01"
           compatibility_flags = ["nodejs_compat"]
+          keep_vars = true
 
-          # 定时任务配置（UTC）
-          # - 每分钟：执行离线节点检测
-          # - 每小时：合并执行其他定时任务（每月1号数据清理、每月8号清理旧表、每天12点服务器到期检测）
+          [[routes]]
+          pattern = "monitor.ms903.org"
+          custom_domain = true
+
           [triggers]
           crons = ["*/1 * * * *", "0 * * * *"]
 
@@ -68,9 +69,8 @@ jobs:
           [[d1_databases]]
           binding = "DB"
           database_name = "server-monitor-db"
-          database_id = "D1_PLACEHOLDER"
+          database_id = "$D1_DATABASE_ID"
 
-          # Durable Objects：实时指标广播中心
           [[durable_objects.bindings]]
           name = "METRICS_BROADCASTER"
           class_name = "MetricsBroadcaster"
@@ -80,40 +80,17 @@ jobs:
           new_sqlite_classes = ["MetricsBroadcaster"]
 
           [vars]
-          API_SECRET = "SECRET_PLACEHOLDER"
-          API_USER_NAME = "USER_NAME_PLACEHOLDER"
-          CORS_ALLOWED_ORIGINS = "CORS_ORIGINS_PLACEHOLDER"
+          API_USER_NAME = "ms903"
+          CORS_ALLOWED_ORIGINS = "https://monitor.ms903.org"
           WEOF
 
-          # 替换占位符
-          sed -i "s|D1_PLACEHOLDER|${{ secrets.D1_DATABASE_ID }}|g" wrangler.toml
-          sed -i "s|SECRET_PLACEHOLDER|${{ secrets.API_SECRET }}|g" wrangler.toml
-          sed -i "s|USER_NAME_PLACEHOLDER|${{ secrets.API_USER_NAME }}|g" wrangler.toml
-          sed -i "s|CORS_ORIGINS_PLACEHOLDER|${{ secrets.CORS_ALLOWED_ORIGINS }}|g" wrangler.toml
-
-          echo "✅ wrangler.toml 已生成"
-
-      # wrangler v4 的 `deploy` 会自动根据 wrangler.toml 中的 [[durable_objects.bindings]]
-      # 声明创建 DO namespace（幂等：已存在则跳过），无需单独命令。
-      # 前提：MetricsBroadcaster 类必须从 index.js 导出（已通过 src/index.js 实现）。
-      - name: 🚀 Deploy to Cloudflare Workers
-        uses: cloudflare/wrangler-action@v3
+      - name: Deploy Worker and encrypted secret
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          wranglerVersion: '4'
           command: deploy
-
-      - name: ✅ Deployment Success
-        if: success()
-        run: |
-          echo "============================================"
-          echo "  🎉 部署成功！"
-          echo "============================================"
-
-      - name: ❌ Deployment Failed
-        if: failure()
-        run: |
-          echo "============================================"
-          echo "  💥 部署失败！请检查 Actions 日志"
-          echo "============================================"
+          secrets: |
+            API_SECRET
+        env:
+          API_SECRET: ${{ secrets.API_SECRET }}
