@@ -318,7 +318,30 @@ export async function handleFamilyPathAPI(request, env, sys) {
     env.DB.prepare('SELECT * FROM family_path_latest').all()
   ]);
   const byId = new Map(servers.map(server => [String(server.id), server]));
+  const url = new URL(request.url);
+  const requestedId = cleanText(url.searchParams.get('server_id'), 128);
+  const includeSparkline = url.searchParams.get('include_sparkline') === '1';
+  const sparklines = new Map();
+  if (includeSparkline) {
+    const history = await env.DB.prepare(`
+      SELECT server_id, family, observed_at, vps_to_home_mbps, home_to_vps_mbps, status
+      FROM family_path_history WHERE observed_at >= ?
+      ORDER BY observed_at ASC
+    `).bind(Date.now() - 7 * 24 * 60 * 60 * 1000).all();
+    for (const point of history.results || []) {
+      if (!byId.has(String(point.server_id)) || (requestedId && String(point.server_id) !== requestedId)) continue;
+      const key = `${point.server_id}:${point.family}`;
+      if (!sparklines.has(key)) sparklines.set(key, []);
+      sparklines.get(key).push({
+        observed_at: Number(point.observed_at),
+        vps_to_home_mbps: point.status === 'ok' ? point.vps_to_home_mbps : null,
+        home_to_vps_mbps: point.status === 'ok' ? point.home_to_vps_mbps : null,
+        status: point.status
+      });
+    }
+  }
   const paths = (rows.results || [])
+    .filter(row => byId.has(String(row.server_id)) && (!requestedId || String(row.server_id) === requestedId))
     .map(row => ({
       server_id: row.server_id,
       server_name: byId.get(String(row.server_id))?.name || row.server_id,
@@ -340,7 +363,8 @@ export async function handleFamilyPathAPI(request, env, sys) {
       vps_to_home_mbps: row.vps_to_home_mbps == null ? null : Number(row.vps_to_home_mbps),
       home_to_vps_mbps: row.home_to_vps_mbps == null ? null : Number(row.home_to_vps_mbps),
       bandwidth_bytes: Number(row.bandwidth_bytes) || 0,
-      bandwidth_error: row.bandwidth_error || ''
+      bandwidth_error: row.bandwidth_error || '',
+      ...(includeSparkline ? { sparkline: sparklines.get(`${row.server_id}:${row.family}`) || [] } : {})
     }))
     .sort((a, b) => a.sort_order - b.sort_order || a.server_name.localeCompare(b.server_name) || a.family.localeCompare(b.family));
   const familyCount = paths.length;
@@ -364,13 +388,14 @@ export async function handleFamilyPathHistory(request, env, sys) {
   if (!serverId || !family || !ALLOWED_HISTORY_HOURS.has(hours)) {
     return createBadRequestResponse('Invalid history query');
   }
+  const server = await getServerDetail(env.DB, serverId, isLoggedIn);
+  if (!server) return createNotFoundResponse('Server not found');
   const cutoff = Date.now() - hours * 60 * 60 * 1000;
   const rows = await env.DB.prepare(`
     SELECT observed_at, vps_to_home_mbps, home_to_vps_mbps, bytes_transferred, status, error
     FROM family_path_history
     WHERE server_id = ? AND family = ? AND observed_at >= ?
     ORDER BY observed_at ASC
-    LIMIT 512
   `).bind(serverId, family, cutoff).all();
   return createSuccessResponse({
     server_id: serverId,

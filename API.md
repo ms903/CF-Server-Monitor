@@ -2187,3 +2187,14 @@ curl -X POST https://status.example.com/admin/api \
 ***
 
 > 文档同步：与源码 `src/index.js`、`src/middleware/auth.js`、`src/handlers/{admin,dashboard,frontend,theme,update}.js`、`src/durable/MetricsBroadcaster.js`、`src/utils/{settings,errors,cors,csp,cache,metrics,common,serverBilling,version,latestReportCache,agentConfig}.js`、`src/database/{schema,updateDatabase}.js` 一一对应；后续修改任一文件时，请同步更新本文件。
+
+## Home 公网双栈链路扩展
+
+现有 shell 探针和 Home Server 采集器保持原有周期：延迟每分钟、双向带宽每 6 小时。带宽方向以 VPS 为准：`vps_to_home_mbps` 是 VPS 上行，`home_to_vps_mbps` 是 VPS 下行，单位均为 Mbps。
+
+- `GET /api/family-path`：最新延迟、上次成功带宽和当前测速任务状态。`can_trigger` 为当前登录权限；公开站点允许读取，触发测试仍需管理员登录。未配置此扩展的后端可以返回 404。
+- 可选 `include_sparkline=1`：批量附带每条链路近 7 天的 `sparkline`，包含 `observed_at`（毫秒）、双向 Mbps 和 `status`。失败样本的带宽值为 `null`，不要补零或跨断点连线。不带此参数时不查询历史，原响应结构不变。可选 `server_id` 筛选单机。只返回当前清单内且当前访问者可见的服务器。
+- `GET /api/family-path/history?server_id=…&family=ipv4|ipv6&hours=24|168|720`：返回对应时间范围完整历史，按时间升序，默认 168 小时；不再截取最早 512 条。缺测与失败由前端画断点，最近记录由前端逆序展示。服务器已删除或不可见时返回 404。
+- `POST /api/family-path/trigger`：JSON `{ "server_id": "…", "family": "ipv6" }` 排队指定链路；省略两项则排队全部已注册链路。复用管理员认证，不向前端下发探针密钥。`queued` / `testing` 是任务状态，`bandwidth_at` 与带宽数值代表上次成功；失败信息位于 `bandwidth_error`。延迟状态独立，失败时不能把旧延迟当作最新成功。
+
+LuminaPlus 原生界面在可见时每 60 秒读最新数据，有排队或正在测速任务时缩短为 3 秒；隐藏页面暂停轮询。首页统一获取小趋势，首次加载、10 分钟缓存过期或测速完成后更新；详情按所属后端、服务器、地址族和时间范围查询历史。原始记录与既有 D1 数据保持不变。
