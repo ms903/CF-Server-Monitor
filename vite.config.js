@@ -65,37 +65,42 @@ function envPlugin() {
   }
 }
 
-export default defineConfig({
-  plugins: [vue(), mkcert(), envPlugin()],
-  base: process.env.VITE_BASE || '/',
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, 'src/frontend')
-    }
-  },
-  build: {
-    outDir: 'dist',
-    assetsDir: 'static',
-    emptyOutDir: true,
-    rollupOptions: {
-      output: {
-        entryFileNames: 'static/[name]-[hash].js',
-        chunkFileNames: 'static/[name]-[hash].js',
-        assetFileNames: 'static/[name]-[hash].[ext]'
+export default defineConfig(({ command }) => {
+  const isCi = ['1', 'true'].includes(String(process.env.CI || '').toLowerCase())
+  const useLocalHttps = command === 'serve' && !isCi
+
+  return {
+    plugins: [vue(), ...(useLocalHttps ? [mkcert()] : []), envPlugin()],
+    base: process.env.VITE_BASE || '/',
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, 'src/frontend')
       }
-    }
-  },
-  server: {
-    https: true,
-    port: 5173,
-    proxy: {
-      '/api': createWorkerProxy(),
-      '/admin/api': createWorkerProxy(),
-      '/theme': createWorkerProxy(),
-      '/update': createWorkerProxy(),
-      '/updateDatabase': createWorkerProxy(),
-      '/clearHistory': createWorkerProxy(),
-      '/__do': createWorkerProxy()
+    },
+    build: {
+      outDir: 'dist',
+      assetsDir: 'static',
+      emptyOutDir: true,
+      rollupOptions: {
+        output: {
+          entryFileNames: 'static/[name]-[hash].js',
+          chunkFileNames: 'static/[name]-[hash].js',
+          assetFileNames: 'static/[name]-[hash].[ext]'
+        }
+      }
+    },
+    server: {
+      https: useLocalHttps,
+      port: 5173,
+      proxy: {
+        '/api': createWorkerProxy(),
+        '/admin/api': createWorkerProxy(),
+        '/theme': createWorkerProxy(),
+        '/update': createWorkerProxy(),
+        '/updateDatabase': createWorkerProxy(),
+        '/clearHistory': createWorkerProxy(),
+        '/__do': createWorkerProxy()
+      }
     }
   }
 })
