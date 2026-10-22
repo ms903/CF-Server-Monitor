@@ -9,20 +9,34 @@
   let latestData = null;
   let observerScheduled = false;
 
-  const isChinese = /^zh\b/i.test(navigator.language || '');
-  const text = isChinese
-    ? {
+  let preferredLanguage = '';
+  try {
+    preferredLanguage = localStorage.getItem('language_preference') || '';
+  } catch (_) {}
+  const language = preferredLanguage === 'zh' || preferredLanguage === 'en' || preferredLanguage === 'es'
+    ? preferredLanguage
+    : (/^zh\b/i.test(navigator.language || '') ? 'zh' : (/^es\b/i.test(navigator.language || '') ? 'es' : 'en'));
+  const messages = {
+    zh: {
         kicker: '源端延迟', all: '全部服务器', measured: '已测',
         hint: '每 60 秒从 Home Server 测量；优先 ICMP，失败时回退 TCP/22。',
         loss: '丢包', waiting: '等待测量', noAddress: '无公网地址',
         unreachable: '不可达', stale: '数据已过期', seconds: '秒前', minutes: '分钟前'
-      }
-    : {
+      },
+    en: {
         kicker: 'SOURCE LATENCY', all: 'All servers', measured: 'measured',
         hint: 'Measured from Home Server every 60 seconds; ICMP first, TCP/22 fallback.',
         loss: 'loss', waiting: 'Awaiting measurement', noAddress: 'No public address',
         unreachable: 'Unreachable', stale: 'Stale result', seconds: 's ago', minutes: 'm ago'
-      };
+      },
+    es: {
+        kicker: 'LATENCIA DE ORIGEN', all: 'Todos los servidores', measured: 'medidos',
+        hint: 'Medido desde Home Server cada 60 segundos; primero ICMP y luego TCP/22.',
+        loss: 'pérdida', waiting: 'Esperando medición', noAddress: 'Sin dirección pública',
+        unreachable: 'Inaccesible', stale: 'Resultado caducado', seconds: 's atrás', minutes: 'min atrás'
+      }
+  };
+  const text = messages[language];
 
   const escapeHtml = value => String(value ?? '')
     .replace(/&/g, '&amp;')
