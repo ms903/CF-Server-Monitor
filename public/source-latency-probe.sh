@@ -58,7 +58,7 @@ measure_target() {
   local ping_flag='-4'
   [[ "$family" == 'ipv6' ]] && ping_flag='-6'
 
-  local output loss latency method error start_ms end_ms
+  local output loss latency method error start_ns end_ns
   output="$(ping "$ping_flag" -n -c "$PING_COUNT" -W "$PING_TIMEOUT" "$address" 2>&1 || true)"
   loss="$(printf '%s\n' "$output" | sed -nE 's/.* ([0-9]+([.][0-9]+)?)% packet loss.*/\1/p' | tail -n1)"
   latency="$(printf '%s\n' "$output" | awk -F' = ' '/^(rtt|round-trip) / { split($2,a,"/"); print a[2] }' | tail -n1)"
@@ -68,10 +68,13 @@ measure_target() {
     [[ "$loss" =~ ^[0-9]+([.][0-9]+)?$ ]] || loss='0'
     error=''
   else
-    start_ms="$(date +%s%3N)"
+    # Use full nanoseconds and convert the elapsed value ourselves.  Some
+    # `date` implementations (notably uutils) ignore the width in `%3N`,
+    # which made a millisecond timer look millions of times too large.
+    start_ns="$(date +%s%N)"
     if nc "$ping_flag" -z -w "$PING_TIMEOUT" "$address" 22 >/dev/null 2>&1; then
-      end_ms="$(date +%s%3N)"
-      latency="$((end_ms - start_ms))"
+      end_ns="$(date +%s%N)"
+      latency="$(awk -v start="$start_ns" -v end="$end_ns" 'BEGIN { printf "%.1f", (end - start) / 1000000 }')"
       loss='0'
       method='tcp/22'
       error=''
