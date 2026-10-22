@@ -150,14 +150,6 @@
       </div>
     </div>
 
-    <SourceLatencyPanel
-      v-if="sourceLatencyData?.source"
-      :data="sourceLatencyData"
-      :loading="sourceLatencyLoading"
-      :now="now"
-      :trans="trans"
-    />
-
     <div id="view-card" class="view-panel" :class="{ active: isCardView, 'high-density': filteredServers.length > 12 }">
       <div v-if="groupedServers.length === 0" class="empty-state">
         [!] {{ trans.noServer }} <a href="/admin#/admin" class="admin-link-color">{{ trans.backToAdmin }}</a>{{ trans.noServerSuffix }}
@@ -380,8 +372,7 @@ import ServerRingCard from '../components/ServerRingCard.vue'
 import Footer from '../components/Footer.vue'
 import OsIcon from '../components/OsIcon.vue'
 import LiveConnectionTimeoutModal from '../components/LiveConnectionTimeoutModal.vue'
-import SourceLatencyPanel from '../components/SourceLatencyPanel.vue'
-import { fetchConfig, fetchServersAll, fetchServersAllWithProgress, fetchSourceLatency, formatBytes, createLiveSocket, getFlagRegionCode, isServerOnline, normalizeLiveSocketTimeoutMinutes } from '../utils/api.js'
+import { fetchConfig, fetchServersAll, fetchServersAllWithProgress, formatBytes, createLiveSocket, getFlagRegionCode, isServerOnline, normalizeLiveSocketTimeoutMinutes } from '../utils/api.js'
 import { calcTrafficUsagePercent, getUsageColor } from '../composables/useServerCardData'
 import { getTitle, hasMultipleApiBases, getApiBases, getPublicAssetUrl } from '../utils/config'
 import { currentLang, useTranslation } from '../utils/i18n.js'
@@ -440,8 +431,6 @@ const sitesRemaining = ref(0)
 const hasCorsError = ref(null)
 const financeModalOpen = ref(false)
 const showLiveTimeoutModal = ref(false)
-const sourceLatencyData = ref(null)
-const sourceLatencyLoading = ref(false)
 const financeCurrency = ref('CNY')
 const exchangeRates = ref(DEFAULT_EXCHANGE_RATES)
 const exchangeRateSource = ref('default')
@@ -988,18 +977,6 @@ const loadDashboardConfig = async () => {
   }
 }
 
-const refreshSourceLatency = async () => {
-  sourceLatencyLoading.value = true
-  try {
-    const data = await fetchSourceLatency()
-    if (data) sourceLatencyData.value = data
-  } catch (e) {
-    console.log('[INFO] Source latency refresh pending...', e)
-  } finally {
-    sourceLatencyLoading.value = false
-  }
-}
-
 const refreshData = async () => {
   const bases = getApiBases()
   const isMultiSite = bases.length > 1
@@ -1093,7 +1070,6 @@ let liveSockets = []
 let liveConnectionClosedByUser = false
 let themeObserver = null
 let timeUpdateInterval = null
-let sourceLatencyInterval = null
 
 const stopLiveSockets = () => {
   if (liveSockets.length === 0) return
@@ -1332,7 +1308,6 @@ onMounted(async () => {
     localStorage.setItem(STORAGE.VIEW_PREFERENCE, savedView)
   }
   await refreshData()
-  await refreshSourceLatency()
   await nextTick()
   scheduleFilterMeasurement()
   if (window.ResizeObserver && filterWrap.value) {
@@ -1348,7 +1323,6 @@ onMounted(async () => {
   // 每秒更新 now 变量，使相对时间实时刷新
   runDashboardTick()
   timeUpdateInterval = setInterval(runDashboardTick, 1000)
-  sourceLatencyInterval = setInterval(refreshSourceLatency, 30_000)
 
   if (currentView.value === 'map') {
     switchView('map')
@@ -1372,7 +1346,6 @@ onUnmounted(() => {
   if (filterMeasureTimer) clearTimeout(filterMeasureTimer)
   if (filterResizeObserver) filterResizeObserver.disconnect()
   if (timeUpdateInterval) clearInterval(timeUpdateInterval)
-  if (sourceLatencyInterval) clearInterval(sourceLatencyInterval)
   stopLiveSockets()
   if (themeObserver) themeObserver.disconnect()
 })
