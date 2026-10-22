@@ -11,6 +11,12 @@ import {
   handlePathBandwidthAPI,
   handlePathBandwidthTrigger
 } from './handlers/pathBandwidth.js';
+import {
+  handleFamilyPathAgent,
+  handleFamilyPathAPI,
+  handleFamilyPathHistory,
+  handleFamilyPathTrigger
+} from './handlers/familyPath.js';
 import { isValidThemeOptions, loadSettings, loadSiteSettings, loadAppearanceOptions, normalizeFrontendWsTimeoutMinutes, normalizeLongHistoryPoints, saveThemeOptions, setDebug, debug } from './utils/settings.js';
 import { omitNullLossProbeFields } from './handlers/dashboard.js';
 import { checkAuth, simpleAuthResponse } from './middleware/auth.js';
@@ -229,6 +235,7 @@ export default {
       '/admin/api',
       '/api/ws',
       '/api/path-bandwidth/agent',
+      '/api/family-path/agent',
     ];
 
     const isApiRequest = path.startsWith('/api/') || path.startsWith('/admin/api');
@@ -307,6 +314,21 @@ export default {
       { method: 'POST', path: '/api/path-bandwidth/trigger', handler: async () => {
         await ensureSiteSettings();
         return handlePathBandwidthTrigger(request, env, sys);
+      }},
+      { method: 'POST', path: '/api/family-path/agent', handler: async () => {
+        return handleFamilyPathAgent(request, env);
+      }},
+      { method: 'GET', path: '/api/family-path', handler: async () => {
+        await ensureSiteSettings();
+        return handleFamilyPathAPI(request, env, sys);
+      }},
+      { method: 'GET', path: '/api/family-path/history', handler: async () => {
+        await ensureSiteSettings();
+        return handleFamilyPathHistory(request, env, sys);
+      }},
+      { method: 'POST', path: '/api/family-path/trigger', handler: async () => {
+        await ensureSiteSettings();
+        return handleFamilyPathTrigger(request, env, sys);
       }},
       { method: 'GET', path: '/__do/health', handler: async () => {
         if (!env.METRICS_BROADCASTER) {
