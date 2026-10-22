@@ -41,7 +41,7 @@
   const escapeHtml = value => String(value ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  const finite = value => Number.isFinite(Number(value)) ? Number(value) : null;
+  const finite = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) ? Number(value) : null;
   const familyLabel = value => value === 'ipv6' ? 'IPv6' : 'IPv4';
   const formatMbps = value => {
     const n = finite(value);
@@ -84,7 +84,8 @@
     const all = paths();
     if (!all.length) return;
     if (!currentPath()) {
-      const first = all.find(path => path.family === 'ipv6' && Number(path.bandwidth_at) > 0)
+      const first = all.find(path => path.family === 'ipv6' && path.bandwidth_status === 'ok' && Number(path.bandwidth_at) > 0)
+        || all.find(path => path.family === 'ipv6' && Number(path.bandwidth_at) > 0)
         || all.find(path => path.family === 'ipv6')
         || all[0];
       selectedServer = String(first.server_id);
@@ -227,7 +228,8 @@
     } catch (_) {
     } finally {
       historyLoading = false;
-      if (panel && latestData) render(panel);
+      const currentPanel = document.getElementById(PANEL_ID);
+      if (currentPanel && latestData) render(currentPanel);
     }
   };
   const scheduleRefresh = () => {
