@@ -22,6 +22,9 @@ INTERVAL_SECONDS="${INTERVAL_SECONDS:-60}"
 PING_COUNT="${PING_COUNT:-4}"
 PING_TIMEOUT="${PING_TIMEOUT:-2}"
 WORKER_URL="${WORKER_URL%/}"
+# The regular CFSM shell probe stores its report endpoint as .../update.
+# Accept that value too, so both probes can safely share the same base setting.
+WORKER_URL="${WORKER_URL%/update}"
 
 for command in curl jq ping nc; do
   if ! command -v "$command" >/dev/null 2>&1; then
