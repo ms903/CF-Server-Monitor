@@ -285,6 +285,16 @@ export default {
     const routes = [
       { method: 'POST', path: '/update', handler: () => handleUpdate(request, env, ctx) },
       { method: 'GET', path: '/update', handler: () => handleUpdateWebSocketUpgrade(request, env) },
+      { method: 'GET', path: '/source-latency-widget.js', handler: async () => {
+        if (!env.ASSETS) return createNotFoundResponse();
+        const assetUrl = new URL('/source-latency-widget.js', request.url);
+        const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, { method: 'GET' }));
+        if (!assetResponse.ok) return assetResponse;
+        const headers = new Headers(assetResponse.headers);
+        headers.set('Content-Type', 'application/javascript;charset=UTF-8');
+        headers.set('Cache-Control', 'public, max-age=300');
+        return new Response(assetResponse.body, { status: 200, headers });
+      }},
       { method: 'GET', path: '/source-latency/targets', handler: () => handleSourceLatencyTargets(request, env) },
       { method: 'POST', path: '/source-latency/update', handler: () => handleSourceLatencyUpdate(request, env) },
       { method: 'GET', path: '/__do/health', handler: async () => {
