@@ -10,8 +10,9 @@ import {
 
 export const PATH_BANDWIDTH_BYTES_EACH = 32 * 1024 * 1024;
 export const PATH_BANDWIDTH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+export const PATH_BANDWIDTH_TIMEOUT_SECONDS = 300;
 const ERROR_RETRY_MS = 15 * 60 * 1000;
-const RUN_LEASE_MS = 3 * 60 * 1000;
+const RUN_LEASE_MS = 12 * 60 * 1000;
 const BANDWIDTH_PORT = 5201;
 const MAX_RESULT_MBPS = 100_000;
 
@@ -167,7 +168,7 @@ async function claimJob(env, server, target) {
       target_name: target.name,
       port: target.port,
       bytes_each: PATH_BANDWIDTH_BYTES_EACH,
-      timeout_seconds: 90
+      timeout_seconds: PATH_BANDWIDTH_TIMEOUT_SECONDS
     },
     retry_after_seconds: 15
   }, { 'Cache-Control': 'no-store' });

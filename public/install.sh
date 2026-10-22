@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.3.8"
+AGENT_VERSION="1.3.9"
 
 # 颜色定义
 RED='\033[0;31m'
@@ -62,6 +62,10 @@ print_usage() {
     echo "  -cu=HOST       自定义CU测试节点"
     echo "  -cm=HOST       自定义CM测试节点"
     echo "  -bd=HOST       自定义BD测试节点"
+    echo "  -node1=HOST    自定义测试节点 1（支持 host:port）"
+    echo "  -node2=HOST    自定义测试节点 2（支持 host:port）"
+    echo "  -node3=HOST    自定义测试节点 3（支持 host:port）"
+    echo "  -node4=HOST    自定义测试节点 4（支持 host:port）"
     echo "  -interface=IFACES 指定网卡统计，多个用英文逗号分隔，默认自动汇总"
     echo "  -reset_day=N   流量重置日(1-31, 0=不重置)，默认1"
     echo "  -auto_update=0|1 自动更新探针，默认0"
@@ -297,6 +301,13 @@ while IFS='=' read -r key value; do
         CU_NODE) CU_NODE="${value%\"}"; CU_NODE="${CU_NODE#\"}" ;;
         CM_NODE) CM_NODE="${value%\"}"; CM_NODE="${CM_NODE#\"}" ;;
         BD_NODE) BD_NODE="${value%\"}"; BD_NODE="${BD_NODE#\"}" ;;
+        NODE_1) NODE_1="${value%\"}"; NODE_1="${NODE_1#\"}" ;;
+        NODE_2) NODE_2="${value%\"}"; NODE_2="${NODE_2#\"}" ;;
+        NODE_3) NODE_3="${value%\"}"; NODE_3="${NODE_3#\"}" ;;
+        NODE_4) NODE_4="${value%\"}"; NODE_4="${NODE_4#\"}" ;;
+        CONNECTION_MODE) CONNECTION_MODE="${value%\"}"; CONNECTION_MODE="${CONNECTION_MODE#\"}" ;;
+        WSS_REPORT_INTERVAL) WSS_REPORT_INTERVAL="${value%\"}"; WSS_REPORT_INTERVAL="${WSS_REPORT_INTERVAL#\"}" ;;
+        PING_MODE) PING_MODE="${value%\"}"; PING_MODE="${PING_MODE#\"}" ;;
         INTERFACE) INTERFACE="${value%\"}"; INTERFACE="${INTERFACE#\"}" ;;
         RESET_DAY) RESET_DAY="${value%\"}"; RESET_DAY="${RESET_DAY#\"}" ;;
         AUTO_UPDATE) AUTO_UPDATE="${value%\"}"; AUTO_UPDATE="${AUTO_UPDATE#\"}" ;;
@@ -322,6 +333,12 @@ ACTIVE_INTERVAL="$REPORT_INTERVAL"
 [ "$COLLECT_INTERVAL" -gt 0 ] && ACTIVE_INTERVAL="$COLLECT_INTERVAL"
 CONFIG_MD5=${CONFIG_MD5:-none}
 INTERFACE=$(normalize_interface_list "${INTERFACE:-}") || INTERFACE=""
+CONNECTION_MODE=${CONNECTION_MODE:-http}
+WSS_REPORT_INTERVAL=${WSS_REPORT_INTERVAL:-2}
+PING_MODE=${PING_MODE:-tcp}
+case "$CONNECTION_MODE" in auto|http) ;; *) CONNECTION_MODE=http ;; esac
+case "$WSS_REPORT_INTERVAL" in 1|2|3|4|5) ;; *) WSS_REPORT_INTERVAL=2 ;; esac
+case "$PING_MODE" in tcp|icmp) ;; *) PING_MODE=tcp ;; esac
 
 log_ts() {
     date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date '+%Y-%m-%d %H:%M:%S'
@@ -447,8 +464,15 @@ persist_dynamic_config() {
         -v cu="$6" \
         -v cm="$7" \
         -v bd="$8" \
-        -v iface="$9" '
-        BEGIN { c=0; r=0; p=0; d=0; m=0; tct=0; tcu=0; tcm=0; tbd=0; ni=0 }
+        -v iface="$9" \
+        -v node1="${10}" \
+        -v node2="${11}" \
+        -v node3="${12}" \
+        -v node4="${13}" \
+        -v connection="${14}" \
+        -v wss_interval="${15}" \
+        -v ping_mode="${16}" '
+        BEGIN { c=0; r=0; d=0; m=0; tct=0; tcu=0; tcm=0; tbd=0; n1=0; n2=0; n3=0; n4=0; ni=0; co=0; wi=0; pm=0 }
         /^COLLECT_INTERVAL=/ { print "COLLECT_INTERVAL=\"" collect "\""; c=1; next }
         /^REPORT_INTERVAL=/ { print "REPORT_INTERVAL=\"" report "\""; r=1; next }
         /^RESET_DAY=/ { print "RESET_DAY=\"" reset "\""; d=1; next }
@@ -457,6 +481,13 @@ persist_dynamic_config() {
         /^CU_NODE=/ { print "CU_NODE=\"" cu "\""; tcu=1; next }
         /^CM_NODE=/ { print "CM_NODE=\"" cm "\""; tcm=1; next }
         /^BD_NODE=/ { print "BD_NODE=\"" bd "\""; tbd=1; next }
+        /^NODE_1=/ { print "NODE_1=\"" node1 "\""; n1=1; next }
+        /^NODE_2=/ { print "NODE_2=\"" node2 "\""; n2=1; next }
+        /^NODE_3=/ { print "NODE_3=\"" node3 "\""; n3=1; next }
+        /^NODE_4=/ { print "NODE_4=\"" node4 "\""; n4=1; next }
+        /^CONNECTION_MODE=/ { print "CONNECTION_MODE=\"" connection "\""; co=1; next }
+        /^WSS_REPORT_INTERVAL=/ { print "WSS_REPORT_INTERVAL=\"" wss_interval "\""; wi=1; next }
+        /^PING_MODE=/ { print "PING_MODE=\"" ping_mode "\""; pm=1; next }
         /^INTERFACE=/ { print "INTERFACE=\"" iface "\""; ni=1; next }
         { print }
         END {
@@ -468,6 +499,13 @@ persist_dynamic_config() {
             if (!tcu) print "CU_NODE=\"" cu "\""
             if (!tcm) print "CM_NODE=\"" cm "\""
             if (!tbd) print "BD_NODE=\"" bd "\""
+            if (!n1) print "NODE_1=\"" node1 "\""
+            if (!n2) print "NODE_2=\"" node2 "\""
+            if (!n3) print "NODE_3=\"" node3 "\""
+            if (!n4) print "NODE_4=\"" node4 "\""
+            if (!co) print "CONNECTION_MODE=\"" connection "\""
+            if (!wi) print "WSS_REPORT_INTERVAL=\"" wss_interval "\""
+            if (!pm) print "PING_MODE=\"" ping_mode "\""
             if (!ni) print "INTERFACE=\"" iface "\""
         }
     ' "$CONFIG_FILE" > "$tmp_file" || { rm -f "$tmp_file"; return 1; }
@@ -476,8 +514,9 @@ persist_dynamic_config() {
 }
 
 apply_remote_config() {
-    local response_file="$1" header_file="$2" body bytes new_md5
+    local response_file="$1" header_file="$2" body validated_body bytes new_md5
     local new_collect new_report new_reset new_schema new_ct new_cu new_cm new_bd new_interface
+    local new_node_1 new_node_2 new_node_3 new_node_4 new_connection_mode new_wss_interval new_ping_mode
     local new_rx_corr new_tx_corr new_update has_config
 
     bytes=$(wc -c < "$response_file" 2>/dev/null || echo 9999)
@@ -487,11 +526,17 @@ apply_remote_config() {
     fi
     body=$(cat "$response_file" 2>/dev/null) || return 1
     log_debug "Remote config raw: bytes=${bytes} body=${body}"
-    case "$body" in
+    validated_body="${body//\[/}"
+    validated_body="${validated_body//\]/}"
+    case "$validated_body" in
         '') log_warn_debug "Remote config rejected: empty body"; return 1 ;;
         *[!A-Za-z0-9_=\&.,:-]*) log_warn_debug "Remote config rejected: invalid characters body=${body}"; return 1 ;;
     esac
 
+    new_collect=""; new_report=""; new_reset=""; new_schema=""
+    new_ct=""; new_cu=""; new_cm=""; new_bd=""; new_interface=""
+    new_node_1=""; new_node_2=""; new_node_3=""; new_node_4=""
+    new_connection_mode=""; new_wss_interval=""; new_ping_mode=""
     new_rx_corr=""
     new_tx_corr=""
     new_update=""
@@ -507,6 +552,13 @@ apply_remote_config() {
             custom_cu)        new_cu="$_v" ;;
             custom_cm)        new_cm="$_v" ;;
             custom_bd)        new_bd="$_v" ;;
+            node_1)           new_node_1="$_v" ;;
+            node_2)           new_node_2="$_v" ;;
+            node_3)           new_node_3="$_v" ;;
+            node_4)           new_node_4="$_v" ;;
+            connection_mode)  new_connection_mode="$_v" ;;
+            wss_report_interval) new_wss_interval="$_v" ;;
+            ping_mode)        new_ping_mode="$_v" ;;
             interface)        new_interface="$_v" ;;
             rx_correction)    new_rx_corr="$_v" ;;
             tx_correction)    new_tx_corr="$_v" ;;
@@ -520,7 +572,7 @@ apply_remote_config() {
     if [ -n "${new_collect:-}" ] || [ -n "${new_report:-}" ] || [ -n "${new_reset:-}" ] || [ -n "${new_schema:-}" ] || [ -n "${new_interface:-}" ]; then
         has_config=1
     fi
-    log_debug "Remote config parsed: has_config=${has_config} update=${new_update:-} collect=${new_collect:-} report=${new_report:-} reset=${new_reset:-} schema=${new_schema:-} interface=${new_interface:-} rx_corr=${new_rx_corr:-} tx_corr=${new_tx_corr:-}"
+    log_debug "Remote config parsed: has_config=${has_config} update=${new_update:-} collect=${new_collect:-} report=${new_report:-} reset=${new_reset:-} schema=${new_schema:-} interface=${new_interface:-} node_1=${new_node_1:-} connection=${new_connection_mode:-} ping_mode=${new_ping_mode:-} rx_corr=${new_rx_corr:-} tx_corr=${new_tx_corr:-}"
 
     if [ "$has_config" = "0" ]; then
         if [ "$new_update" = "1" ]; then
@@ -544,10 +596,14 @@ apply_remote_config() {
     case "$new_report" in 30|60|120|180) ;; *) log_warn_debug "Remote config rejected: invalid report_interval=${new_report:-}"; return 1 ;; esac
     case "$new_reset" in 0|[1-9]|1[0-9]|2[0-9]|30|31) ;; *) log_warn_debug "Remote config rejected: invalid reset_day=${new_reset:-}"; return 1 ;; esac
     case "$new_update" in ''|0|1) ;; *) log_warn_debug "Remote config rejected: invalid update=${new_update}"; return 1 ;; esac
-    if [ "$new_schema" != "3" ]; then
+    if [ "$new_schema" != "7" ]; then
         log_warn_debug "Remote config rejected: invalid schema_version=${new_schema:-}"
         return 1
     fi
+    case "$new_connection_mode" in auto|http) ;; *) log_warn_debug "Remote config rejected: invalid connection_mode=${new_connection_mode:-}"; return 1 ;; esac
+    [ -z "$new_wss_interval" ] && new_wss_interval=2
+    case "$new_wss_interval" in 1|2|3|4|5) ;; *) log_warn_debug "Remote config rejected: invalid wss_report_interval=${new_wss_interval:-}"; return 1 ;; esac
+    case "$new_ping_mode" in tcp|icmp) ;; *) log_warn_debug "Remote config rejected: invalid ping_mode=${new_ping_mode:-}"; return 1 ;; esac
     new_interface=$(normalize_interface_list "${new_interface:-}") || { log_warn_debug "Remote config rejected: invalid interface=${new_interface:-}"; return 1; }
     if [ "$new_report" -lt "$new_collect" ]; then
         log_warn_debug "Remote config rejected: report_interval=${new_report} less than collect_interval=${new_collect}"
@@ -555,7 +611,8 @@ apply_remote_config() {
     fi
 
     if [ "$new_md5" != "${CONFIG_MD5:-none}" ]; then
-        persist_dynamic_config "$new_collect" "$new_report" "$new_reset" "$new_md5" "$new_ct" "$new_cu" "$new_cm" "$new_bd" "$new_interface" || return 1
+        persist_dynamic_config "$new_collect" "$new_report" "$new_reset" "$new_md5" "$new_ct" "$new_cu" "$new_cm" "$new_bd" "$new_interface" \
+            "$new_node_1" "$new_node_2" "$new_node_3" "$new_node_4" "$new_connection_mode" "$new_wss_interval" "$new_ping_mode" || return 1
         COLLECT_INTERVAL="$new_collect"
         REPORT_INTERVAL="$new_report"
         RESET_DAY="$new_reset"
@@ -563,6 +620,13 @@ apply_remote_config() {
         CU_NODE="$new_cu"
         CM_NODE="$new_cm"
         BD_NODE="$new_bd"
+        NODE_1="$new_node_1"
+        NODE_2="$new_node_2"
+        NODE_3="$new_node_3"
+        NODE_4="$new_node_4"
+        CONNECTION_MODE="$new_connection_mode"
+        WSS_REPORT_INTERVAL="$new_wss_interval"
+        PING_MODE="$new_ping_mode"
         INTERFACE="$new_interface"
         CONFIG_MD5="$new_md5"
         ACTIVE_INTERVAL="$REPORT_INTERVAL"
@@ -571,7 +635,7 @@ apply_remote_config() {
         RX_PREV=$(echo "$NET_STAT" | awk '{print $1}'); RX_PREV=${RX_PREV:-0}
         TX_PREV=$(echo "$NET_STAT" | awk '{print $2}'); TX_PREV=${TX_PREV:-0}
         PREV_LOOP_TIME=$(date +%s)
-        log_info "Dynamic configuration applied: md5=${CONFIG_MD5} interface=${INTERFACE:-auto} ct=${CT_NODE:-} cu=${CU_NODE:-} cm=${CM_NODE:-} bd=${BD_NODE:-}"
+        log_info "Dynamic configuration applied: md5=${CONFIG_MD5} interface=${INTERFACE:-auto} ct=${CT_NODE:-} cu=${CU_NODE:-} cm=${CM_NODE:-} bd=${BD_NODE:-} node_1=${NODE_1:-} ping_mode=${PING_MODE}"
 
         if kill -0 "$WORKER_PID" 2>/dev/null; then
             pkill -P "$WORKER_PID" 2>/dev/null || true
@@ -1020,13 +1084,25 @@ split_probe_target() {
     local default_port="${2:-443}"
     local probe_host="$target"
     local probe_port="$default_port"
+    local suffix=""
 
     case "$target" in
-        ''|*[!A-Za-z0-9._:-]*) return 1 ;;
+        ''|*[!A-Za-z0-9._:\[\]-]*) return 1 ;;
+        \[*\])
+            probe_host="${target#\[}"
+            probe_host="${probe_host%\]}"
+            ;;
+        \[*\]:*)
+            probe_host="${target#\[}"
+            probe_host="${probe_host%%\]*}"
+            suffix="${target#*\]}"
+            case "$suffix" in :[0-9]*) probe_port="${suffix#:}" ;; *) return 1 ;; esac
+            ;;
         *:*)
-            case "${target#*:}" in *:*) return 1 ;; esac
-            probe_host="${target%:*}"
-            probe_port="${target##*:}"
+            if [[ "${target#*:}" != *:* ]]; then
+                probe_host="${target%:*}"
+                probe_port="${target##*:}"
+            fi
             ;;
     esac
 
@@ -1057,7 +1133,7 @@ get_probe() {
     host="${probe_target% *}"
     port="${probe_target##* }"
 
-    if has_nc_zero_io && get_time_ms >/dev/null 2>&1; then
+    if [ "${PING_MODE:-tcp}" != "icmp" ] && has_nc_zero_io && get_time_ms >/dev/null 2>&1; then
         local ok=0 values="" i=1 rtt
         while [ "$i" -le "$count" ]; do
             rtt=$(get_tcp_ping_nc "$host" "$port" 2>/dev/null)
@@ -1102,6 +1178,10 @@ CT_NODE="${CT_NODE:-}"
 CU_NODE="${CU_NODE:-}"
 CM_NODE="${CM_NODE:-}"
 BD_NODE="${BD_NODE:-}"
+NODE_1="${NODE_1:-}"
+NODE_2="${NODE_2:-}"
+NODE_3="${NODE_3:-}"
+NODE_4="${NODE_4:-}"
 
 write_probe_result() {
     local dest="$1"
@@ -1137,6 +1217,10 @@ refresh_probe_async() {
     [ -n "$CU_NODE" ] && write_probe_result /dev/shm/.cf_probe_cu get_probe "$CU_NODE" 4 443
     [ -n "$CM_NODE" ] && write_probe_result /dev/shm/.cf_probe_cm get_probe "$CM_NODE" 4 443
     [ -n "$BD_NODE" ] && write_probe_result /dev/shm/.cf_probe_bd get_probe "$BD_NODE" 4 443
+    [ -n "$NODE_1" ] && write_probe_result /dev/shm/.cf_probe_node_1 get_probe "$NODE_1" 4 443
+    [ -n "$NODE_2" ] && write_probe_result /dev/shm/.cf_probe_node_2 get_probe "$NODE_2" 4 443
+    [ -n "$NODE_3" ] && write_probe_result /dev/shm/.cf_probe_node_3 get_probe "$NODE_3" 4 443
+    [ -n "$NODE_4" ] && write_probe_result /dev/shm/.cf_probe_node_4 get_probe "$NODE_4" 4 443
 }
 
 # ==============================================================================
@@ -1202,7 +1286,7 @@ fi
 
 log_info "CF-Server-Monitor Probe Engine Started Successfully."
 log_debug "Config: id=${SERVER_ID} url=${WORKER_URL} report_interval=${REPORT_INTERVAL}s collect_interval=${COLLECT_INTERVAL}s active_interval=${ACTIVE_INTERVAL}s reset_day=${RESET_DAY} interface=${INTERFACE:-auto} auto_update=${AUTO_UPDATE} secret_len=${#SECRET}"
-log_debug "Nodes: ct=${CT_NODE:-} cu=${CU_NODE:-} cm=${CM_NODE:-} bd=${BD_NODE:-}"
+log_debug "Nodes: ct=${CT_NODE:-} cu=${CU_NODE:-} cm=${CM_NODE:-} bd=${BD_NODE:-} node_1=${NODE_1:-} node_2=${NODE_2:-} node_3=${NODE_3:-} node_4=${NODE_4:-} ping_mode=${PING_MODE:-tcp}"
 
 # 核心架构升级：在这里脱离主循环，静默启动常驻网络 Worker 协程，无 wait 干扰
 run_network_worker &
@@ -1375,6 +1459,10 @@ while true; do
     if [ -f /dev/shm/.cf_probe_cu ]; then _p=$(cat /dev/shm/.cf_probe_cu); PING_CU=${_p%% *}; LOSS_CU=${_p##* }; else PING_CU=""; LOSS_CU=""; fi
     if [ -f /dev/shm/.cf_probe_cm ]; then _p=$(cat /dev/shm/.cf_probe_cm); PING_CM=${_p%% *}; LOSS_CM=${_p##* }; else PING_CM=""; LOSS_CM=""; fi
     if [ -f /dev/shm/.cf_probe_bd ]; then _p=$(cat /dev/shm/.cf_probe_bd); PING_BD=${_p%% *}; LOSS_BD=${_p##* }; else PING_BD=""; LOSS_BD=""; fi
+    if [ -f /dev/shm/.cf_probe_node_1 ]; then _p=$(cat /dev/shm/.cf_probe_node_1); PING_NODE_1=${_p%% *}; LOSS_NODE_1=${_p##* }; else PING_NODE_1=""; LOSS_NODE_1=""; fi
+    if [ -f /dev/shm/.cf_probe_node_2 ]; then _p=$(cat /dev/shm/.cf_probe_node_2); PING_NODE_2=${_p%% *}; LOSS_NODE_2=${_p##* }; else PING_NODE_2=""; LOSS_NODE_2=""; fi
+    if [ -f /dev/shm/.cf_probe_node_3 ]; then _p=$(cat /dev/shm/.cf_probe_node_3); PING_NODE_3=${_p%% *}; LOSS_NODE_3=${_p##* }; else PING_NODE_3=""; LOSS_NODE_3=""; fi
+    if [ -f /dev/shm/.cf_probe_node_4 ]; then _p=$(cat /dev/shm/.cf_probe_node_4); PING_NODE_4=${_p%% *}; LOSS_NODE_4=${_p##* }; else PING_NODE_4=""; LOSS_NODE_4=""; fi
 
     # 安全地构建闭合规范的 JSON 数据流
     EOS=$(escape_json "${OS}")
@@ -1389,9 +1477,17 @@ while true; do
     LOSS_CU_JSON=$(json_probe_value "$CU_NODE" "$LOSS_CU")
     LOSS_CM_JSON=$(json_probe_value "$CM_NODE" "$LOSS_CM")
     LOSS_BD_JSON=$(json_probe_value "$BD_NODE" "$LOSS_BD")
+    PING_NODE_1_JSON=$(json_probe_value "$NODE_1" "$PING_NODE_1")
+    PING_NODE_2_JSON=$(json_probe_value "$NODE_2" "$PING_NODE_2")
+    PING_NODE_3_JSON=$(json_probe_value "$NODE_3" "$PING_NODE_3")
+    PING_NODE_4_JSON=$(json_probe_value "$NODE_4" "$PING_NODE_4")
+    LOSS_NODE_1_JSON=$(json_probe_value "$NODE_1" "$LOSS_NODE_1")
+    LOSS_NODE_2_JSON=$(json_probe_value "$NODE_2" "$LOSS_NODE_2")
+    LOSS_NODE_3_JSON=$(json_probe_value "$NODE_3" "$LOSS_NODE_3")
+    LOSS_NODE_4_JSON=$(json_probe_value "$NODE_4" "$LOSS_NODE_4")
 
     METRICS_JSON=$(cat <<EOF
-{"cpu":"$CPU","ram_total":"$RAM_TOTAL","ram_used":"$RAM_USED","swap_total":"$SWAP_TOTAL","swap_used":"$SWAP_USED","disk_total":"$DISK_TOTAL","disk_used":"$DISK_USED","load_avg":"$LOAD_AVG","boot_time":"$BOOT_TIME","net_rx":"$RX_NOW","net_tx":"$TX_NOW","net_rx_monthly":"$RX_MONTHLY","net_tx_monthly":"$TX_MONTHLY","net_in_speed":"$RX_SPEED","net_out_speed":"$TX_SPEED","os":"$EOS","arch":"$EARCH","kernel_version":"$EKERNEL","cpu_info":"$ECPU","cpu_cores":"$CPU_CORES","gpu_info":$GPU_INFO_VALUE,"processes":"$PROCESSES","tcp_conn":"$TCP_CONN","udp_conn":"$UDP_CONN","ip_v4":"$IPV4","ip_v6":"$IPV6","ping_ct":$PING_CT_JSON,"ping_cu":$PING_CU_JSON,"ping_cm":$PING_CM_JSON,"ping_bd":$PING_BD_JSON,"loss_ct":$LOSS_CT_JSON,"loss_cu":$LOSS_CU_JSON,"loss_cm":$LOSS_CM_JSON,"loss_bd":$LOSS_BD_JSON}
+{"cpu":"$CPU","ram_total":"$RAM_TOTAL","ram_used":"$RAM_USED","swap_total":"$SWAP_TOTAL","swap_used":"$SWAP_USED","disk_total":"$DISK_TOTAL","disk_used":"$DISK_USED","load_avg":"$LOAD_AVG","boot_time":"$BOOT_TIME","net_rx":"$RX_NOW","net_tx":"$TX_NOW","net_rx_monthly":"$RX_MONTHLY","net_tx_monthly":"$TX_MONTHLY","net_in_speed":"$RX_SPEED","net_out_speed":"$TX_SPEED","os":"$EOS","arch":"$EARCH","kernel_version":"$EKERNEL","cpu_info":"$ECPU","cpu_cores":"$CPU_CORES","gpu_info":$GPU_INFO_VALUE,"processes":"$PROCESSES","tcp_conn":"$TCP_CONN","udp_conn":"$UDP_CONN","ip_v4":"$IPV4","ip_v6":"$IPV6","ping_ct":$PING_CT_JSON,"ping_cu":$PING_CU_JSON,"ping_cm":$PING_CM_JSON,"ping_bd":$PING_BD_JSON,"ping_node_1":$PING_NODE_1_JSON,"ping_node_2":$PING_NODE_2_JSON,"ping_node_3":$PING_NODE_3_JSON,"ping_node_4":$PING_NODE_4_JSON,"loss_ct":$LOSS_CT_JSON,"loss_cu":$LOSS_CU_JSON,"loss_cm":$LOSS_CM_JSON,"loss_bd":$LOSS_BD_JSON,"loss_node_1":$LOSS_NODE_1_JSON,"loss_node_2":$LOSS_NODE_2_JSON,"loss_node_3":$LOSS_NODE_3_JSON,"loss_node_4":$LOSS_NODE_4_JSON}
 EOF
 )
     SAMPLE_METRICS_JSON=$(cat <<EOF
@@ -1431,7 +1527,7 @@ EOF
         REPORT_HEADERS=""
         REPORT_HTTP_CODE=$(curl -sS -D "$REPORT_HEADER_FILE" -o "$REPORT_RESPONSE_FILE" -w "%{http_code}" -X POST \
             -H "Content-Type: application/json" \
-            -H "X-Agent-Config-Schema: 3" \
+            -H "X-Agent-Config-Schema: 7" \
             -H "X-Agent-Version: ${AGENT_VERSION}" \
             -H "X-Agent-Config-Md5: ${CONFIG_MD5:-none}" \
             -d "$PAYLOAD" -m 8 --connect-timeout 3 "$WORKER_URL" 2>"$REPORT_ERROR_FILE")
@@ -1560,6 +1656,13 @@ install_probe() {
     CU_NODE=""
     CM_NODE=""
     BD_NODE=""
+    NODE_1=""
+    NODE_2=""
+    NODE_3=""
+    NODE_4=""
+    CONNECTION_MODE="http"
+    WSS_REPORT_INTERVAL="2"
+    PING_MODE="tcp"
     INTERFACE=""
     RESET_DAY=""
     AUTO_UPDATE=""
@@ -1579,6 +1682,10 @@ install_probe() {
             -cu=*) CU_NODE="${arg#-cu=}" ;;
             -cm=*) CM_NODE="${arg#-cm=}" ;;
             -bd=*) BD_NODE="${arg#-bd=}" ;;
+            -node1=*) NODE_1="${arg#-node1=}" ;;
+            -node2=*) NODE_2="${arg#-node2=}" ;;
+            -node3=*) NODE_3="${arg#-node3=}" ;;
+            -node4=*) NODE_4="${arg#-node4=}" ;;
             -interface=*|-interfaces=*|-iface=*) INTERFACE="${arg#*=}" ;;
             -reset_day=*) RESET_DAY="${arg#-reset_day=}" ;;
             -auto_update=*|-auto-update=*) AUTO_UPDATE=$(normalize_binary_value "${arg#*=}") || error "auto_update 参数非法，仅支持 0 或 1" ;;
@@ -1617,6 +1724,13 @@ CT_NODE="${CT_NODE:-}"
 CU_NODE="${CU_NODE:-}"
 CM_NODE="${CM_NODE:-}"
 BD_NODE="${BD_NODE:-}"
+NODE_1="${NODE_1:-}"
+NODE_2="${NODE_2:-}"
+NODE_3="${NODE_3:-}"
+NODE_4="${NODE_4:-}"
+CONNECTION_MODE="${CONNECTION_MODE:-http}"
+WSS_REPORT_INTERVAL="${WSS_REPORT_INTERVAL:-2}"
+PING_MODE="${PING_MODE:-tcp}"
 INTERFACE="${INTERFACE:-}"
 RESET_DAY="${RESET_DAY}"
 AUTO_UPDATE="${AUTO_UPDATE}"
@@ -1637,6 +1751,13 @@ EOF
                     CU_NODE) CU_NODE="${value%\"}"; CU_NODE="${CU_NODE#\"}" ;;
                     CM_NODE) CM_NODE="${value%\"}"; CM_NODE="${CM_NODE#\"}" ;;
                     BD_NODE) BD_NODE="${value%\"}"; BD_NODE="${BD_NODE#\"}" ;;
+                    NODE_1) NODE_1="${value%\"}"; NODE_1="${NODE_1#\"}" ;;
+                    NODE_2) NODE_2="${value%\"}"; NODE_2="${NODE_2#\"}" ;;
+                    NODE_3) NODE_3="${value%\"}"; NODE_3="${NODE_3#\"}" ;;
+                    NODE_4) NODE_4="${value%\"}"; NODE_4="${NODE_4#\"}" ;;
+                    CONNECTION_MODE) CONNECTION_MODE="${value%\"}"; CONNECTION_MODE="${CONNECTION_MODE#\"}" ;;
+                    WSS_REPORT_INTERVAL) WSS_REPORT_INTERVAL="${value%\"}"; WSS_REPORT_INTERVAL="${WSS_REPORT_INTERVAL#\"}" ;;
+                    PING_MODE) PING_MODE="${value%\"}"; PING_MODE="${PING_MODE#\"}" ;;
                     INTERFACE) INTERFACE="${value%\"}"; INTERFACE="${INTERFACE#\"}" ;;
                     RESET_DAY) RESET_DAY="${value%\"}"; RESET_DAY="${RESET_DAY#\"}" ;;
                     AUTO_UPDATE) AUTO_UPDATE="${value%\"}"; AUTO_UPDATE="${AUTO_UPDATE#\"}" ;;
@@ -1680,6 +1801,13 @@ CT_NODE="${CT_NODE:-}"
 CU_NODE="${CU_NODE:-}"
 CM_NODE="${CM_NODE:-}"
 BD_NODE="${BD_NODE:-}"
+NODE_1="${NODE_1:-}"
+NODE_2="${NODE_2:-}"
+NODE_3="${NODE_3:-}"
+NODE_4="${NODE_4:-}"
+CONNECTION_MODE="${CONNECTION_MODE:-http}"
+WSS_REPORT_INTERVAL="${WSS_REPORT_INTERVAL:-2}"
+PING_MODE="${PING_MODE:-tcp}"
 INTERFACE="${INTERFACE:-}"
 RESET_DAY="${RESET_DAY}"
 AUTO_UPDATE="${AUTO_UPDATE}"
@@ -1695,6 +1823,12 @@ EOF
     DEBUG_MODE=$(normalize_binary_value "$DEBUG_MODE" 0) || error "debug 参数非法，仅支持 0 或 1"
     CONFIG_MD5=${CONFIG_MD5:-none}
     INTERFACE=$(normalize_interface_list "${INTERFACE:-}") || error "interface 参数非法，请使用英文逗号分隔的网卡名"
+    CONNECTION_MODE=${CONNECTION_MODE:-http}
+    WSS_REPORT_INTERVAL=${WSS_REPORT_INTERVAL:-2}
+    PING_MODE=${PING_MODE:-tcp}
+    case "$CONNECTION_MODE" in auto|http) ;; *) CONNECTION_MODE=http ;; esac
+    case "$WSS_REPORT_INTERVAL" in 1|2|3|4|5) ;; *) WSS_REPORT_INTERVAL=2 ;; esac
+    case "$PING_MODE" in tcp|icmp) ;; *) PING_MODE=tcp ;; esac
 
     if [ -n "${RX_CORRECTION}" ] || [ -n "${TX_CORRECTION}" ]; then
         step "应用流量校正..."
@@ -1752,6 +1886,10 @@ EOF
     [ -n "${CU_NODE}" ] && echo -e "    ● CU节点      : ${CU_NODE}"
     [ -n "${CM_NODE}" ] && echo -e "    ● CM节点      : ${CM_NODE}"
     [ -n "${BD_NODE}" ] && echo -e "    ● BD节点      : ${BD_NODE}"
+    [ -n "${NODE_1}" ] && echo -e "    ● 自定义节点 1: ${NODE_1}"
+    [ -n "${NODE_2}" ] && echo -e "    ● 自定义节点 2: ${NODE_2}"
+    [ -n "${NODE_3}" ] && echo -e "    ● 自定义节点 3: ${NODE_3}"
+    [ -n "${NODE_4}" ] && echo -e "    ● 自定义节点 4: ${NODE_4}"
     if [ "$RUNTIME_MODE" = "systemd" ]; then
         echo -e "  管理指令 :"
         echo -e "    ● 查看实时日志 : journalctl -u ${SERVICE_NAME} -f"

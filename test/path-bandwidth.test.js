@@ -5,12 +5,14 @@ import {
   normalizeBandwidthResult,
   parseBandwidthTarget,
   PATH_BANDWIDTH_BYTES_EACH,
-  PATH_BANDWIDTH_INTERVAL_MS
+  PATH_BANDWIDTH_INTERVAL_MS,
+  PATH_BANDWIDTH_TIMEOUT_SECONDS
 } from '../src/handlers/pathBandwidth.js';
 
 test('uses a fixed-size daily test to keep traffic predictable', () => {
   assert.equal(PATH_BANDWIDTH_BYTES_EACH, 32 * 1024 * 1024);
   assert.equal(PATH_BANDWIDTH_INTERVAL_MS, 24 * 60 * 60 * 1000);
+  assert.equal(PATH_BANDWIDTH_TIMEOUT_SECONDS, 300);
 });
 
 test('extracts the host from the Home Server ping target', () => {
