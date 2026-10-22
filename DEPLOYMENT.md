@@ -26,8 +26,12 @@ Pushes to `main` deploy production automatically. Scheduled upstream sync is
 disabled because upstream workflow changes must be reviewed before they reach
 production; run **Upstream Sync** manually when an upstream update is wanted.
 
-## First login
+## Production login
 
-Open `https://monitor.ms903.org/admin#/admin`. The initial username is `ms903`
-and the initial password is the Worker `API_SECRET`. Change the dashboard login
-password after the first login; Agent reporting continues to use `API_SECRET`.
+Open `https://monitor.ms903.org/admin#/admin` and use username `ms903`. The
+dashboard password has already been separated from the Agent reporting secret.
+Both locally managed values are stored only on the Home Server in the
+mode-`0600` file `~/.config/cfsm-deploy/cfsm-secrets.env`:
+
+- `ADMIN_PASSWORD` is the dashboard login password.
+- `API_SECRET` is only for installing and authenticating Agents.
