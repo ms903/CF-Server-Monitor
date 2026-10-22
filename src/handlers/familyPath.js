@@ -203,12 +203,12 @@ async function saveBandwidthResult(env, body) {
       ON CONFLICT(server_id, family) DO UPDATE SET
         ip_address = excluded.ip_address,
         bandwidth_status = excluded.bandwidth_status,
-        bandwidth_at = excluded.bandwidth_at,
-        vps_to_home_mbps = excluded.vps_to_home_mbps,
-        home_to_vps_mbps = excluded.home_to_vps_mbps,
-        bandwidth_bytes = excluded.bandwidth_bytes,
+        bandwidth_at = CASE WHEN excluded.bandwidth_status = 'ok' THEN excluded.bandwidth_at ELSE family_path_latest.bandwidth_at END,
+        vps_to_home_mbps = CASE WHEN excluded.bandwidth_status = 'ok' THEN excluded.vps_to_home_mbps ELSE family_path_latest.vps_to_home_mbps END,
+        home_to_vps_mbps = CASE WHEN excluded.bandwidth_status = 'ok' THEN excluded.home_to_vps_mbps ELSE family_path_latest.home_to_vps_mbps END,
+        bandwidth_bytes = CASE WHEN excluded.bandwidth_status = 'ok' THEN excluded.bandwidth_bytes ELSE family_path_latest.bandwidth_bytes END,
         bandwidth_error = excluded.bandwidth_error
-      WHERE excluded.bandwidth_at >= family_path_latest.bandwidth_at
+      WHERE excluded.bandwidth_at >= family_path_latest.bandwidth_started_at
     `).bind(
       server.id,
       result.family,
@@ -263,7 +263,7 @@ async function claimManualJob(env) {
     WHERE f.ip_address != '' AND (
       f.bandwidth_status = 'queued'
       OR f.bandwidth_status = 'waiting'
-      OR (f.bandwidth_status = 'error' AND f.bandwidth_at < ?)
+      OR (f.bandwidth_status = 'error' AND f.bandwidth_started_at < ?)
       OR (f.bandwidth_status = 'ok' AND f.bandwidth_at < ?)
     )
     ORDER BY
