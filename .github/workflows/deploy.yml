@@ -48,6 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$D1_DATABASE_ID"
+          BANDWIDTH_PROFILES="$(tr -d '\n' < deploy/family-path-bandwidth-profiles.json)"
           cat > wrangler.toml <<WEOF
           name = "cf-server-monitor"
           main = "src/index.js"
@@ -82,6 +83,7 @@ jobs:
           [vars]
           API_USER_NAME = "ms903"
           CORS_ALLOWED_ORIGINS = "https://monitor.ms903.org"
+          FAMILY_PATH_BANDWIDTH_PROFILES = '$BANDWIDTH_PROFILES'
           WEOF
 
       - name: Deploy Worker and encrypted secret

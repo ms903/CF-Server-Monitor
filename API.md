@@ -2192,6 +2192,10 @@ curl -X POST https://status.example.com/admin/api \
 
 现有 shell 探针和 Home Server 采集器保持原有周期：延迟每分钟、双向带宽每 6 小时。带宽方向以 VPS 为准：`vps_to_home_mbps` 是 VPS 上行，`home_to_vps_mbps` 是 VPS 下行，单位均为 Mbps。
 
+从 2026-11-08 起，66 US、Zoro US 的带宽采集改用开源 iperf3，4 路 TCP 并行，每方向目标有效载荷 64 MiB。Home 通过已有 SSH 身份临时启动 VPS 的 iperf3，一次测试结束后关闭监听；数据直连对应公网 IP，不经过 SSH 隧道或 Tailscale。结果取 `end.sum_received` 的实际接收字节数与接收时间；零字节、不足 1 秒、错误或不完整结果上报失败，不用发送端 socket 写入速度补值。其他链路继续使用原采集方式和 4/2 MiB 预算。新旧记录保留原值，切换前后的协议和采样量不同。
+
+Worker 可选变量 `FAMILY_PATH_BANDWIDTH_PROFILES` 为按服务器 ID 索引的 JSON 对象，例如 `{"server-id":{"download_bytes":67108864,"upload_bytes":67108864}}`。每项必须同时提供两个正整数，单方向不超过 256 MiB；未覆盖的服务器仍是下载 4 MiB、上传 2 MiB。`claim` 使用该服务器的预算；采集器还应用本地上限。`max_bytes_per_test` 返回当前查询范围最大的双向有效载荷预算，`estimated_monthly_bytes` 按可见链路各自预算、6 小时周期和 30 天相加，不把 US 的额度套用到其他节点。实际 `bandwidth_bytes` / `bytes_transferred` 包含 iperf3 块对齐超量；基础月预算不含重传、协议开销、失败重试和手动测速。
+
 - `GET /api/family-path`：最新延迟、上次成功带宽和当前测速任务状态。`can_trigger` 为当前登录权限；公开站点允许读取，触发测试仍需管理员登录。未配置此扩展的后端可以返回 404。
 - 可选 `include_sparkline=1`：批量附带每条链路近 7 天的 `sparkline`，包含 `observed_at`（毫秒）、双向 Mbps 和 `status`。失败样本的带宽值为 `null`，不要补零或跨断点连线。不带此参数时不查询历史，原响应结构不变。可选 `server_id` 筛选单机。只返回当前清单内且当前访问者可见的服务器。
 - `GET /api/family-path/history?server_id=…&family=ipv4|ipv6&hours=24|168|720`：返回对应时间范围完整历史，按时间升序，默认 168 小时；不再截取最早 512 条。缺测与失败由前端画断点，最近记录由前端逆序展示。服务器已删除或不可见时返回 404。

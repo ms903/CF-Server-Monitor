@@ -65,10 +65,10 @@ test('accepts a target without inventing a fake bandwidth result', () => {
   });
 });
 
-import { handleFamilyPathAPI, handleFamilyPathHistory } from '../src/handlers/familyPath.js';
+import { handleFamilyPathAPI, handleFamilyPathHistory, handleFamilyPathAgent } from '../src/handlers/familyPath.js';
 import { clearServersListCache } from '../src/utils/cache.js';
 
-function fakeDB({ servers = [], paths = [], history = [] } = {}) {
+function fakeDB({ servers = [], paths = [], history = [], job = null } = {}) {
   const queries = [];
   return {
     queries,
@@ -77,8 +77,8 @@ function fakeDB({ servers = [], paths = [], history = [] } = {}) {
       let args = [];
       return {
         bind(...values) { args = values; return this; },
-        async run() { return {}; },
-        async first() { return servers.find(s => s.id === args[0]) || null; },
+        async run() { return { meta: { changes: 1 } }; },
+        async first() { return sql.includes('FROM family_path_latest') ? job : servers.find(s => s.id === args[0]) || null; },
         async all() {
           if (sql.includes('FROM servers')) return { results: servers };
           if (sql.includes('FROM family_path_latest')) return { results: paths };
@@ -135,4 +135,39 @@ test('30-day history includes latest samples beyond the previous 512-row limit',
 test('private family data requires authentication', async () => {
   const response = await handleFamilyPathAPI(new Request('https://test/api/family-path'), { DB: fakeDB() }, { is_public: 'false' });
   assert.equal(response.status, 401);
+});
+
+test('per-server budgets leave legacy collectors at 4/2 MiB', () => {
+  const profiles = __test.bandwidthProfiles({ FAMILY_PATH_BANDWIDTH_PROFILES: JSON.stringify({ us: { download_bytes: 67108864, upload_bytes: 67108864 } }) });
+  assert.deepEqual(__test.bandwidthLimits(profiles, 'us'), { download_bytes: 67108864, upload_bytes: 67108864 });
+  assert.deepEqual(__test.bandwidthLimits(profiles, 'hk'), { download_bytes: 4194304, upload_bytes: 2097152 });
+  for (const invalid of ['null', '[]', '{', '{"us":{"download_bytes":-1,"upload_bytes":1}}', '{"us":{"download_bytes":1,"upload_bytes":9999999999}}']) {
+    assert.throws(() => __test.bandwidthProfiles({ FAMILY_PATH_BANDWIDTH_PROFILES: invalid }));
+  }
+});
+
+test('latest computes mixed monthly budgets only for visible scoped paths', async () => {
+  clearServersListCache();
+  const env = { DB: fakeDB({ servers: [{ id: 'us', name: 'US' }, { id: 'hk', name: 'HK' }], paths: [{ server_id: 'us', family: 'ipv4' }, { server_id: 'hk', family: 'ipv4' }, { server_id: 'hk', family: 'ipv6' }, { server_id: 'gone', family: 'ipv4' }] }),
+    FAMILY_PATH_BANDWIDTH_PROFILES: '{"us":{"download_bytes":67108864,"upload_bytes":67108864}}' };
+  const response = await handleFamilyPathAPI(new Request('https://test/api/family-path'), env, { is_public: 'true' });
+  const result = await response.json();
+  assert.equal(result.max_bytes_per_test, 134217728);
+  assert.equal(result.estimated_monthly_bytes, (134217728 + 2 * 6291456) * 120);
+  const scoped = await (await handleFamilyPathAPI(new Request('https://test/api/family-path?server_id=hk'), env, { is_public: 'true' })).json();
+  assert.equal(scoped.max_bytes_per_test, 6291456);
+  assert.equal(scoped.estimated_monthly_bytes, 2 * 6291456 * 120);
+  clearServersListCache();
+});
+
+test('claims use the configured budget for the selected server', async () => {
+  clearServersListCache();
+  const env = { API_SECRET: 'test-secret', FAMILY_PATH_BANDWIDTH_PROFILES: '{"us":{"download_bytes":67108864,"upload_bytes":67108864}}',
+    DB: fakeDB({ servers: [{ id: 'home', name: 'Home Server' }], job: { server_id: 'us', name: 'US', family: 'ipv4', ip_address: '192.0.2.1' } }) };
+  const response = await handleFamilyPathAgent(new Request('https://test/api/family-path/agent', { method: 'POST', headers: { 'X-CFSM-Server-ID': 'home', 'X-CFSM-Secret': 'test-secret' }, body: '{"action":"claim"}' }), env);
+  const result = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(result.job.download_bytes, 67108864);
+  assert.equal(result.job.upload_bytes, 67108864);
+  clearServersListCache();
 });

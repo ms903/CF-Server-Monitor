@@ -19,6 +19,32 @@ const BANDWIDTH_LEASE_MS = 15 * 60 * 1000;
 const BANDWIDTH_INTERVAL_MS = FAMILY_PATH_BANDWIDTH_INTERVAL_HOURS * 60 * 60 * 1000;
 const BANDWIDTH_ERROR_RETRY_MS = 15 * 60 * 1000;
 const HISTORY_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+const MAX_PROFILE_BYTES = 256 * 1024 * 1024;
+
+// Optional per-server payload budgets. Existing collectors keep the 4/2 MiB
+// contract unless their server ID has an explicit override.
+function bandwidthProfiles(env) {
+  const profiles = env.FAMILY_PATH_BANDWIDTH_PROFILES
+    ? JSON.parse(env.FAMILY_PATH_BANDWIDTH_PROFILES)
+    : {};
+  if (!profiles || typeof profiles !== 'object' || Array.isArray(profiles)) {
+    throw new Error('Invalid FAMILY_PATH_BANDWIDTH_PROFILES');
+  }
+  for (const profile of Object.values(profiles)) {
+    if (!profile || !['download_bytes', 'upload_bytes'].every(key =>
+      Number.isSafeInteger(profile[key]) && profile[key] > 0 && profile[key] <= MAX_PROFILE_BYTES)) {
+      throw new Error('Invalid FAMILY_PATH_BANDWIDTH_PROFILES byte budget');
+    }
+  }
+  return profiles;
+}
+
+function bandwidthLimits(profiles, serverId) {
+  return profiles[serverId] || {
+    download_bytes: FAMILY_PATH_DOWNLOAD_BYTES,
+    upload_bytes: FAMILY_PATH_UPLOAD_BYTES
+  };
+}
 
 function cleanText(value, max = 128) {
   return String(value ?? '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, max);
@@ -249,6 +275,7 @@ async function saveBandwidthResult(env, body) {
 }
 
 async function claimManualJob(env) {
+  const profiles = bandwidthProfiles(env);
   const now = Date.now();
   const staleBefore = now - BANDWIDTH_LEASE_MS;
   await env.DB.prepare(`
@@ -289,8 +316,7 @@ async function claimManualJob(env) {
       server_name: row.name,
       family: row.family,
       ip_address: row.ip_address,
-      download_bytes: FAMILY_PATH_DOWNLOAD_BYTES,
-      upload_bytes: FAMILY_PATH_UPLOAD_BYTES
+      ...bandwidthLimits(profiles, row.server_id)
     },
     retry_after_seconds: 3
   });
@@ -367,12 +393,16 @@ export async function handleFamilyPathAPI(request, env, sys) {
       ...(includeSparkline ? { sparkline: sparklines.get(`${row.server_id}:${row.family}`) || [] } : {})
     }))
     .sort((a, b) => a.sort_order - b.sort_order || a.server_name.localeCompare(b.server_name) || a.family.localeCompare(b.family));
-  const familyCount = paths.length;
+  const profiles = bandwidthProfiles(env);
+  const budgets = paths.map(path => {
+    const limits = bandwidthLimits(profiles, path.server_id);
+    return limits.download_bytes + limits.upload_bytes;
+  });
   return createSuccessResponse({
     can_trigger: isLoggedIn,
     bandwidth_interval_hours: FAMILY_PATH_BANDWIDTH_INTERVAL_HOURS,
-    max_bytes_per_test: FAMILY_PATH_DOWNLOAD_BYTES + FAMILY_PATH_UPLOAD_BYTES,
-    estimated_monthly_bytes: familyCount * (24 / FAMILY_PATH_BANDWIDTH_INTERVAL_HOURS) * 30 * (FAMILY_PATH_DOWNLOAD_BYTES + FAMILY_PATH_UPLOAD_BYTES),
+    max_bytes_per_test: Math.max(FAMILY_PATH_DOWNLOAD_BYTES + FAMILY_PATH_UPLOAD_BYTES, ...budgets),
+    estimated_monthly_bytes: budgets.reduce((sum, bytes) => sum + bytes, 0) * (24 / FAMILY_PATH_BANDWIDTH_INTERVAL_HOURS) * 30,
     paths
   }, { 'Cache-Control': 'no-store' });
 }
@@ -441,5 +471,7 @@ export const __test = {
   normalizeFamily,
   normalizeLatencySample,
   normalizeBandwidthResult,
-  normalizeTarget
+  normalizeTarget,
+  bandwidthProfiles,
+  bandwidthLimits
 };
