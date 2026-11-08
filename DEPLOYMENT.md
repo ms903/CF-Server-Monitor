@@ -45,9 +45,11 @@ their 4/2 MiB samples. The baseline payload budget is about 34.9 GiB per 30 days
 for all nine paths, plus block alignment, retransmissions, protocol overhead,
 retries, and manual tests.
 
-Production activation status and the remaining deployment action are recorded
-in `docs/us-speed-repair-20261108.md`. Do not enable the collector's US iperf
-targets until the backend's new job budgets are live.
+Production was activated on 2026-11-08: both US jobs completed under the running
+Home service and their latest/history values agree. Deployment evidence and
+rollback locations are recorded in `docs/us-speed-repair-20261108.md`. For a
+future rollout, enable the collector's US iperf targets only after the backend's
+matching job budgets are live.
 
 `deploy/family-path-bandwidth-profiles.json` is the production source for the
 Worker's `FAMILY_PATH_BANDWIDTH_PROFILES` variable. Entries use stable server
@@ -63,3 +65,7 @@ iperf3; SSH uses the existing host aliases and pinned host keys. Each temporary
 VPS listener is restricted to the current SSH source IP and automatically
 closes after one test, with a 90-second watchdog. No permanent public iperf
 service is installed.
+
+Production also sets each US target's optional `iperf_ssh_config` to the existing
+Home user SSH config, avoiding unrelated system proxy includes without changing
+host-key checks or system SSH files.
