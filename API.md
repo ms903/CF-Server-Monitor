@@ -2192,7 +2192,7 @@ curl -X POST https://status.example.com/admin/api \
 
 现有 shell 探针和 Home Server 采集器保持原有周期：延迟每分钟、双向带宽每 6 小时。带宽方向以 VPS 为准：`vps_to_home_mbps` 是 VPS 上行，`home_to_vps_mbps` 是 VPS 下行，单位均为 Mbps。
 
-从 2026-11-08 起，66 US、Zoro US 的带宽采集改用开源 iperf3，4 路 TCP 并行，每方向目标有效载荷 64 MiB。Home 通过已有 SSH 身份临时启动 VPS 的 iperf3，一次测试结束后关闭监听；数据直连对应公网 IP，不经过 SSH 隧道或 Tailscale。结果取 `end.sum_received` 的实际接收字节数与接收时间；零字节、不足 1 秒、错误或不完整结果上报失败，不用发送端 socket 写入速度补值。其他链路继续使用原采集方式和 4/2 MiB 预算。新旧记录保留原值，切换前后的协议和采样量不同。
+启用 2026-11-08 的采集器修复和 US 预算后，66 US、Zoro US 的带宽采集使用开源 iperf3，4 路 TCP 并行，每方向目标有效载荷 64 MiB。Home 通过已有 SSH 身份临时启动 VPS 的 iperf3，一次测试结束后关闭监听；数据直连对应公网 IP，不经过 SSH 隧道或 Tailscale。结果取 `end.sum_received` 的实际接收字节数与接收时间；零字节、不足 1 秒、错误或不完整结果上报失败，不用发送端 socket 写入速度补值。其他链路继续使用原采集方式和 4/2 MiB 预算。新旧记录保留原值，切换前后的协议和采样量不同。生产启用状态见 `docs/us-speed-repair-20261108.md`。
 
 Worker 可选变量 `FAMILY_PATH_BANDWIDTH_PROFILES` 为按服务器 ID 索引的 JSON 对象，例如 `{"server-id":{"download_bytes":67108864,"upload_bytes":67108864}}`。每项必须同时提供两个正整数，单方向不超过 256 MiB；未覆盖的服务器仍是下载 4 MiB、上传 2 MiB。`claim` 使用该服务器的预算；采集器还应用本地上限。`max_bytes_per_test` 返回当前查询范围最大的双向有效载荷预算，`estimated_monthly_bytes` 按可见链路各自预算、6 小时周期和 30 天相加，不把 US 的额度套用到其他节点。实际 `bandwidth_bytes` / `bytes_transferred` 包含 iperf3 块对齐超量；基础月预算不含重传、协议开销、失败重试和手动测速。
 

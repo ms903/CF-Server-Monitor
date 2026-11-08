@@ -38,12 +38,16 @@ mode-`0600` file `~/.config/cfsm-deploy/cfsm-secrets.env`:
 
 ## US public-path bandwidth tests
 
-66 US and Zoro US use the existing Home collector with iperf3 rather than the
+The US repair adds iperf3 to the existing Home collector rather than using the
 small QUIC samples. Each direction targets 64 MiB over four TCP streams; the
 six-hour schedule is unchanged. The other seven address-family paths retain
 their 4/2 MiB samples. The baseline payload budget is about 34.9 GiB per 30 days
 for all nine paths, plus block alignment, retransmissions, protocol overhead,
 retries, and manual tests.
+
+Production activation status and the remaining deployment action are recorded
+in `docs/us-speed-repair-20261108.md`. Do not enable the collector's US iperf
+targets until the backend's new job budgets are live.
 
 `deploy/family-path-bandwidth-profiles.json` is the production source for the
 Worker's `FAMILY_PATH_BANDWIDTH_PROFILES` variable. Entries use stable server
