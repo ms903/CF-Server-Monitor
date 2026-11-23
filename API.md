@@ -2190,7 +2190,7 @@ curl -X POST https://status.example.com/admin/api \
 
 ## Home 公网双栈链路扩展
 
-现有 shell 探针和 Home Server 采集器保持原有周期：延迟每分钟、双向带宽每 6 小时。带宽方向以 VPS 为准：`vps_to_home_mbps` 是 VPS 上行，`home_to_vps_mbps` 是 VPS 下行，单位均为 Mbps。
+旧字节模式的周期为延迟每分钟、双向带宽每 6 小时；当前生产的计时模式见本节末尾。API 字段按实际传输方向命名，单位是 Mbps：`vps_to_home_mbps` 在 Home 视角是下载 ↓，`home_to_vps_mbps` 是上传 ↑。这只改变显示口径，不交换 API 字段或历史数值。
 
 启用 2026-11-08 的采集器修复和 US 预算后，66 US、Zoro US 的带宽采集使用开源 iperf3，4 路 TCP 并行，每方向目标有效载荷 64 MiB。Home 通过已有 SSH 身份临时启动 VPS 的 iperf3，一次测试结束后关闭监听；数据直连对应公网 IP，不经过 SSH 隧道或 Tailscale。结果取 `end.sum_received` 的实际接收字节数与接收时间；零字节、不足 1 秒、错误或不完整结果上报失败，不用发送端 socket 写入速度补值。其他链路继续使用原采集方式和 4/2 MiB 预算。新旧记录保留原值，切换前后的协议和采样量不同。生产启用状态见 `docs/us-speed-repair-20261108.md`。
 
