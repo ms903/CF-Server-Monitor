@@ -505,7 +505,10 @@ export async function handleFamilyPathTrigger(request, env, sys) {
   const requestedFamily = body.family ? normalizeFamily(body.family) : '';
   if (body.family && !requestedFamily) return createBadRequestResponse('Invalid family');
   let rows = (await env.DB.prepare(`
-    SELECT server_id, family FROM family_path_latest ORDER BY server_id, family
+    SELECT f.server_id, f.family
+    FROM family_path_latest f
+    JOIN servers s ON s.id = f.server_id
+    ORDER BY f.server_id, f.family
   `).all()).results || [];
   if (requestedId) rows = rows.filter(row => String(row.server_id) === requestedId);
   if (requestedFamily) rows = rows.filter(row => row.family === requestedFamily);
