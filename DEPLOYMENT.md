@@ -69,3 +69,17 @@ service is installed.
 Production also sets each US target's optional `iperf_ssh_config` to the existing
 Home user SSH config, avoiding unrelated system proxy includes without changing
 host-key checks or system SSH files.
+
+## Timed public-path bandwidth tests
+
+Production settings are in `deploy/family-path-timed-settings.json`: 15 seconds
+of TCP measurement in each direction after three seconds of warm-up, automatic
+tests once per 24 hours per address. Manual queueing is unchanged. The collector
+opts in at claim; an old binary still receives the legacy byte job for rollback.
+Deploy the Worker before enabling `timed_iperf` on Home. Backends without timed
+settings continue to use the six-hour byte-mode contract.
+
+Timed results include sender TCP retransmissions in each direction and a
+separate 30-echo ICMP check before the TCP transfer. Previous results remain
+readable. See the API document for monthly traffic estimation and unavailable
+values.

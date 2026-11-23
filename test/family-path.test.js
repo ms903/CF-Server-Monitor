@@ -171,3 +171,49 @@ test('claims use the configured budget for the selected server', async () => {
   assert.equal(result.job.upload_bytes, 67108864);
   clearServersListCache();
 });
+
+const quality = {
+  duration_seconds: 15, warmup_seconds: 3,
+  vps_to_home: { seconds: 15.1, retransmits: 0 },
+  home_to_vps: { seconds: 15.2, retransmits: 8 },
+  icmp: { sent: 30, received: 29, rtt_avg_ms: 22.5, rtt_mdev_ms: 0.6 }
+};
+const timing = '{"duration_seconds":15,"interval_hours":24}';
+
+test('timed result round trip preserves measured duration, zero retransmits and ICMP counts', async () => {
+  clearServersListCache();
+  const input = { server_name: 'HK', family: 'ipv6', ip_address: '2001:db8::1',
+    vps_to_home_mbps: 125, home_to_vps_mbps: 75, bytes_transferred: 400000000, bandwidth_details: quality };
+  assert.deepEqual(__test.normalizeBandwidthResult(input).bandwidth_details, quality);
+  assert.equal(__test.normalizeBandwidthResult({ ...input, bandwidth_details: { ...quality, home_to_vps: { seconds: 3 } } }), null);
+  assert.equal('bandwidth_details' in __test.normalizeBandwidthResult({ ...input, error: 'incomplete' }), false);
+  const db = fakeDB({ servers: [{ id: 'a', name: 'HK' }],
+    paths: [{ server_id: 'a', family: 'ipv6', bandwidth_bytes: 400000000, bandwidth_details: JSON.stringify(quality) }],
+    history: [{ observed_at: 1, status: 'ok', bandwidth_details: JSON.stringify(quality) }, { observed_at: 2, status: 'ok' }] });
+  const env = { DB: db, FAMILY_PATH_TIMED_SETTINGS: timing };
+  const latest = await (await handleFamilyPathAPI(new Request('https://test/api/family-path'), env, { is_public: 'true' })).json();
+  assert.equal(latest.bandwidth_interval_hours, 24);
+  assert.equal(latest.bandwidth_duration_seconds, 15);
+  assert.equal(latest.max_bytes_per_test, null);
+  assert.equal(latest.estimated_monthly_bytes, 400000000 * 30);
+  assert.deepEqual(latest.paths[0].bandwidth_details, quality);
+  const history = await (await handleFamilyPathHistory(new Request('https://test/api/family-path/history?server_id=a&family=ipv6'), env, { is_public: 'true' })).json();
+  assert.deepEqual(history.points[0].bandwidth_details, quality);
+  assert.equal('bandwidth_details' in history.points[1], false);
+  clearServersListCache();
+});
+
+test('only an opted-in collector gets a timed job; byte-mode collectors still get their budgets', async () => {
+  clearServersListCache();
+  const env = { API_SECRET: 'test-secret', FAMILY_PATH_TIMED_SETTINGS: timing,
+    DB: fakeDB({ servers: [{ id: 'home', name: 'Home Server' }], job: { server_id: 'hk', name: 'HK', family: 'ipv4', ip_address: '192.0.2.1' } }) };
+  for (const timed of [true, false]) {
+    const request = new Request('https://test/api/family-path/agent', { method: 'POST',
+      headers: { 'X-CFSM-Server-ID': 'home', 'X-CFSM-Secret': 'test-secret' },
+      body: JSON.stringify({ action: 'claim', timed_iperf: timed }) });
+    const { job } = await (await handleFamilyPathAgent(request, env)).json();
+    assert.equal(job.duration_seconds, timed ? 15 : undefined);
+    assert.equal(job.download_bytes, timed ? undefined : FAMILY_PATH_DOWNLOAD_BYTES);
+  }
+  clearServersListCache();
+});

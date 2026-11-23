@@ -2202,3 +2202,20 @@ Worker 可选变量 `FAMILY_PATH_BANDWIDTH_PROFILES` 为按服务器 ID 索引�
 - `POST /api/family-path/trigger`：JSON `{ "server_id": "…", "family": "ipv6" }` 排队指定链路；省略两项则排队全部已注册链路。复用管理员认证，不向前端下发探针密钥。`queued` / `testing` 是任务状态，`bandwidth_at` 与带宽数值代表上次成功；失败信息位于 `bandwidth_error`。延迟状态独立，失败时不能把旧延迟当作最新成功。
 
 LuminaPlus 原生界面在可见时每 60 秒读最新数据，有排队或正在测速任务时缩短为 3 秒；隐藏页面暂停轮询。首页统一获取小趋势，首次加载、10 分钟缓存过期或测速完成后更新；详情按所属后端、服务器、地址族和时间范围查询历史。原始记录与既有 D1 数据保持不变。
+
+### 生产定时 TCP 测速（2026-11-23）
+
+`FAMILY_PATH_TIMED_SETTINGS` 为空时沿用上述字节预算。配置为
+`{"duration_seconds":15,"interval_hours":24}` 时，发送
+`{"action":"claim","timed_iperf":true}` 的采集器领取计时任务，`job.duration_seconds`
+是每方向的有效测量秒数；该任务无固定字节预算。手动排队的入口及请求体不变。
+计时任务失败后自动等到下一周期，管理员可提前手动排队。
+
+计时成功结果在最新及历史中带可选 `bandwidth_details`：
+`duration_seconds`、`warmup_seconds`、`vps_to_home` 和 `home_to_vps`（各含接收端
+`seconds` 和发送端 TCP `retransmits`），以及同次测速前的 `icmp`（30 次
+Echo 的 `sent`、`received`、`rtt_avg_ms`、`rtt_mdev_ms`）。ICMP 丢包为
+`1 - received / sent`，与 TCP 重传次数分别解读。不可用的测量留空。历史字节模式记录保持不变。
+
+计时模式的 `max_bytes_per_test` 为 `null`；`estimated_monthly_bytes` 以所选路径
+最新的同档计时样本（包括预热有效载荷）和自动周期估算，样本不齐时为 `null`。

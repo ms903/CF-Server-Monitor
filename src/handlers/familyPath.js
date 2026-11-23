@@ -16,7 +16,15 @@ const MAX_ERROR_LENGTH = 240;
 const MAX_MBPS = 100_000;
 const ALLOWED_HISTORY_HOURS = new Set([24, 168, 720]);
 const BANDWIDTH_LEASE_MS = 15 * 60 * 1000;
-const BANDWIDTH_INTERVAL_MS = FAMILY_PATH_BANDWIDTH_INTERVAL_HOURS * 60 * 60 * 1000;
+function timedBandwidth(env) {
+  if (!env.FAMILY_PATH_TIMED_SETTINGS) return null;
+  const settings = JSON.parse(env.FAMILY_PATH_TIMED_SETTINGS);
+  if (!Number.isInteger(settings?.duration_seconds) || settings.duration_seconds < 5 || settings.duration_seconds > 60 ||
+      !Number.isInteger(settings.interval_hours) || settings.interval_hours < 6 || settings.interval_hours > 168) {
+    throw new Error('Invalid FAMILY_PATH_TIMED_SETTINGS');
+  }
+  return settings;
+}
 const BANDWIDTH_ERROR_RETRY_MS = 15 * 60 * 1000;
 const HISTORY_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_PROFILE_BYTES = 256 * 1024 * 1024;
@@ -92,6 +100,33 @@ function normalizeLatencySample(value) {
   };
 }
 
+// A method tag and its metrics travel together with the successful sample.
+function normalizeBandwidthDetails(value) {
+  if (!value || !Number.isInteger(value.duration_seconds) || value.duration_seconds < 5 || value.duration_seconds > 60 ||
+      !Number.isInteger(value.warmup_seconds) || value.warmup_seconds < 0 || value.warmup_seconds > 10) return null;
+  const result = { duration_seconds: value.duration_seconds, warmup_seconds: value.warmup_seconds };
+  for (const direction of ['vps_to_home', 'home_to_vps']) {
+    const source = value[direction];
+    const seconds = finite(source?.seconds, value.duration_seconds - 1, value.duration_seconds + 5);
+    if (seconds === null) return null;
+    const retransmits = finite(source?.retransmits, 0);
+    result[direction] = { seconds, retransmits: Number.isSafeInteger(retransmits) ? retransmits : null };
+  }
+  const echo = value.icmp;
+  if (echo && echo.sent === 30 && Number.isInteger(echo.received) && echo.received >= 0 && echo.received <= echo.sent) {
+    result.icmp = {
+      sent: echo.sent, received: echo.received,
+      rtt_avg_ms: echo.received ? finite(echo.rtt_avg_ms, 0, 60_000) : null,
+      rtt_mdev_ms: echo.received ? finite(echo.rtt_mdev_ms, 0, 60_000) : null
+    };
+  }
+  return result;
+}
+
+function readBandwidthDetails(value) {
+  return value ? JSON.parse(value) : null;
+}
+
 function normalizeBandwidthResult(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const serverName = cleanText(value.server_name, 100);
@@ -101,6 +136,8 @@ function normalizeBandwidthResult(value) {
   const error = cleanText(value.error, MAX_ERROR_LENGTH);
   const vpsToHome = finite(value.vps_to_home_mbps, 0.0001, MAX_MBPS);
   const homeToVps = finite(value.home_to_vps_mbps, 0.0001, MAX_MBPS);
+  const details = error ? null : normalizeBandwidthDetails(value.bandwidth_details);
+  if (!error && value.bandwidth_details != null && !details) return null;
   if (!error && (vpsToHome === null || homeToVps === null)) return null;
   return {
     server_name: serverName,
@@ -110,6 +147,7 @@ function normalizeBandwidthResult(value) {
     vps_to_home_mbps: vpsToHome === null ? null : Math.round(vpsToHome * 100) / 100,
     home_to_vps_mbps: homeToVps === null ? null : Math.round(homeToVps * 100) / 100,
     bytes_transferred: Math.round(finite(value.bytes_transferred, 0, 1024 ** 4) || 0),
+    ...(details ? { bandwidth_details: details } : {}),
     error
   };
 }
@@ -221,12 +259,13 @@ async function saveBandwidthResult(env, body) {
   const server = servers.get(result.server_name.toLowerCase());
   if (!server) return createNotFoundResponse('Server not found');
   const status = result.error ? 'error' : 'ok';
+  const details = result.bandwidth_details ? JSON.stringify(result.bandwidth_details) : null;
   await env.DB.batch([
     env.DB.prepare(`
       INSERT INTO family_path_latest (
         server_id, family, ip_address, bandwidth_status, bandwidth_at,
-        vps_to_home_mbps, home_to_vps_mbps, bandwidth_bytes, bandwidth_error
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        vps_to_home_mbps, home_to_vps_mbps, bandwidth_bytes, bandwidth_error, bandwidth_details
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(server_id, family) DO UPDATE SET
         ip_address = excluded.ip_address,
         bandwidth_status = excluded.bandwidth_status,
@@ -234,6 +273,7 @@ async function saveBandwidthResult(env, body) {
         vps_to_home_mbps = CASE WHEN excluded.bandwidth_status = 'ok' THEN excluded.vps_to_home_mbps ELSE family_path_latest.vps_to_home_mbps END,
         home_to_vps_mbps = CASE WHEN excluded.bandwidth_status = 'ok' THEN excluded.home_to_vps_mbps ELSE family_path_latest.home_to_vps_mbps END,
         bandwidth_bytes = CASE WHEN excluded.bandwidth_status = 'ok' THEN excluded.bandwidth_bytes ELSE family_path_latest.bandwidth_bytes END,
+        bandwidth_details = CASE WHEN excluded.bandwidth_status = 'ok' THEN excluded.bandwidth_details ELSE family_path_latest.bandwidth_details END,
         bandwidth_error = excluded.bandwidth_error
       WHERE excluded.bandwidth_at >= family_path_latest.bandwidth_at
     `).bind(
@@ -245,19 +285,21 @@ async function saveBandwidthResult(env, body) {
       result.vps_to_home_mbps,
       result.home_to_vps_mbps,
       result.bytes_transferred,
-      result.error
+      result.error,
+      details
     ),
     env.DB.prepare(`
       INSERT INTO family_path_history (
         server_id, family, observed_at, vps_to_home_mbps, home_to_vps_mbps,
-        bytes_transferred, status, error
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        bytes_transferred, status, error, bandwidth_details
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(server_id, family, observed_at) DO UPDATE SET
         vps_to_home_mbps = excluded.vps_to_home_mbps,
         home_to_vps_mbps = excluded.home_to_vps_mbps,
         bytes_transferred = excluded.bytes_transferred,
         status = excluded.status,
-        error = excluded.error
+        error = excluded.error,
+        bandwidth_details = excluded.bandwidth_details
     `).bind(
       server.id,
       result.family,
@@ -266,7 +308,8 @@ async function saveBandwidthResult(env, body) {
       result.home_to_vps_mbps,
       result.bytes_transferred,
       status,
-      result.error
+      result.error,
+      details
     ),
     env.DB.prepare('DELETE FROM family_path_history WHERE observed_at < ?')
       .bind(Date.now() - HISTORY_RETENTION_MS)
@@ -274,7 +317,9 @@ async function saveBandwidthResult(env, body) {
   return createSuccessResponse({ success: true, status, observed_at: result.observed_at });
 }
 
-async function claimManualJob(env) {
+async function claimManualJob(env, acceptsTimed) {
+  const timed = acceptsTimed ? timedBandwidth(env) : null;
+  const interval = (timed?.interval_hours ?? FAMILY_PATH_BANDWIDTH_INTERVAL_HOURS) * 3_600_000;
   const profiles = bandwidthProfiles(env);
   const now = Date.now();
   const staleBefore = now - BANDWIDTH_LEASE_MS;
@@ -301,7 +346,7 @@ async function claimManualJob(env) {
       f.bandwidth_requested_at ASC,
       f.bandwidth_at ASC
     LIMIT 1
-  `).bind(now - BANDWIDTH_ERROR_RETRY_MS, now - BANDWIDTH_INTERVAL_MS).first();
+  `).bind(now - (timed ? interval : BANDWIDTH_ERROR_RETRY_MS), now - interval).first();
   if (!row) return createSuccessResponse({ job: null, retry_after_seconds: 15 });
   const update = await env.DB.prepare(`
     UPDATE family_path_latest
@@ -316,7 +361,7 @@ async function claimManualJob(env) {
       server_name: row.name,
       family: row.family,
       ip_address: row.ip_address,
-      ...bandwidthLimits(profiles, row.server_id)
+      ...(timed ? { duration_seconds: timed.duration_seconds } : bandwidthLimits(profiles, row.server_id))
     },
     retry_after_seconds: 3
   });
@@ -331,7 +376,7 @@ export async function handleFamilyPathAgent(request, env) {
   if (body.action === 'latency') return saveLatencyBatch(env, body);
   if (body.action === 'bandwidth_start') return markBandwidthStart(env, body);
   if (body.action === 'bandwidth_result') return saveBandwidthResult(env, body);
-  if (body.action === 'claim') return claimManualJob(env);
+  if (body.action === 'claim') return claimManualJob(env, body.timed_iperf === true);
   return createBadRequestResponse('Invalid action');
 }
 
@@ -390,6 +435,7 @@ export async function handleFamilyPathAPI(request, env, sys) {
       home_to_vps_mbps: row.home_to_vps_mbps == null ? null : Number(row.home_to_vps_mbps),
       bandwidth_bytes: Number(row.bandwidth_bytes) || 0,
       bandwidth_error: row.bandwidth_error || '',
+      ...(row.bandwidth_details ? { bandwidth_details: readBandwidthDetails(row.bandwidth_details) } : {}),
       ...(includeSparkline ? { sparkline: sparklines.get(`${row.server_id}:${row.family}`) || [] } : {})
     }))
     .sort((a, b) => a.sort_order - b.sort_order || a.server_name.localeCompare(b.server_name) || a.family.localeCompare(b.family));
@@ -398,11 +444,18 @@ export async function handleFamilyPathAPI(request, env, sys) {
     const limits = bandwidthLimits(profiles, path.server_id);
     return limits.download_bytes + limits.upload_bytes;
   });
+  const timed = timedBandwidth(env);
+  const interval = timed?.interval_hours ?? FAMILY_PATH_BANDWIDTH_INTERVAL_HOURS;
+  const monthly = timed
+    ? (paths.every(path => path.bandwidth_details?.duration_seconds === timed.duration_seconds)
+        ? paths.reduce((sum, path) => sum + path.bandwidth_bytes, 0) * (24 / interval) * 30 : null)
+    : budgets.reduce((sum, bytes) => sum + bytes, 0) * (24 / interval) * 30;
   return createSuccessResponse({
     can_trigger: isLoggedIn,
-    bandwidth_interval_hours: FAMILY_PATH_BANDWIDTH_INTERVAL_HOURS,
-    max_bytes_per_test: Math.max(FAMILY_PATH_DOWNLOAD_BYTES + FAMILY_PATH_UPLOAD_BYTES, ...budgets),
-    estimated_monthly_bytes: budgets.reduce((sum, bytes) => sum + bytes, 0) * (24 / FAMILY_PATH_BANDWIDTH_INTERVAL_HOURS) * 30,
+    bandwidth_interval_hours: interval,
+    ...(timed ? { bandwidth_duration_seconds: timed.duration_seconds } : {}),
+    max_bytes_per_test: timed ? null : Math.max(FAMILY_PATH_DOWNLOAD_BYTES + FAMILY_PATH_UPLOAD_BYTES, ...budgets),
+    estimated_monthly_bytes: monthly,
     paths
   }, { 'Cache-Control': 'no-store' });
 }
@@ -422,7 +475,7 @@ export async function handleFamilyPathHistory(request, env, sys) {
   if (!server) return createNotFoundResponse('Server not found');
   const cutoff = Date.now() - hours * 60 * 60 * 1000;
   const rows = await env.DB.prepare(`
-    SELECT observed_at, vps_to_home_mbps, home_to_vps_mbps, bytes_transferred, status, error
+    SELECT observed_at, vps_to_home_mbps, home_to_vps_mbps, bytes_transferred, status, error, bandwidth_details
     FROM family_path_history
     WHERE server_id = ? AND family = ? AND observed_at >= ?
     ORDER BY observed_at ASC
@@ -437,7 +490,8 @@ export async function handleFamilyPathHistory(request, env, sys) {
       home_to_vps_mbps: row.home_to_vps_mbps == null ? null : Number(row.home_to_vps_mbps),
       bytes_transferred: Number(row.bytes_transferred) || 0,
       status: row.status,
-      error: row.error || ''
+      error: row.error || '',
+      ...(row.bandwidth_details ? { bandwidth_details: readBandwidthDetails(row.bandwidth_details) } : {})
     }))
   }, { 'Cache-Control': 'no-store' });
 }
